@@ -62,8 +62,22 @@ def to_single_value(list_of_values):
         return list_of_values[0]
 
 
+def normalize_publisher(val):
+    return val[:-1] if val[-1] == ',' else val
+
+
 def get_rid_of_punctuation(value):
     return ''.join(char.replace(',', '').replace('.', '') for char in value)
+
+
+def prepare_name_for_indexing(value):
+    value = ''.join(char.replace('  ', ' ').replace(',', '').replace('.', '') for char in value)
+    if value[0] == ' ':
+        value = value[1:]
+    if value[-1] == ' ':
+        value = value[:-1]
+
+    return value
 
 
 def postprocess(postprocess_method, list_of_values):
@@ -107,3 +121,54 @@ def create_jsonlines_like_dict(list_of_values, marc_object, marc_tag):
             return processed_list_of_values
     else:
         return list_of_values
+
+
+class ObjCounter(object):
+    __slots__ = 'count'
+
+    def __init__(self):
+        self.count = 0
+
+    def __repr__(self):
+        return f'ObjCounter(title_count={self.count}'
+
+    def add(self, number_to_add):
+        self.count += number_to_add
+
+
+def serialize_to_jsonl_descr(subfields_zero_list):
+    if subfields_zero_list:
+        list_to_return = []
+        for subfield_zero in subfields_zero_list:
+            d_id, d_type, d_value = subfield_zero.split('^^')
+            list_to_return.append({'id': int(d_id), 'type': d_type, 'value': d_value})
+        return list_to_return
+    else:
+        return subfields_zero_list
+
+
+def serialize_to_jsonl_descr_creator(subfields_zero_list):
+    if subfields_zero_list:
+        list_to_return = []
+        dict_to_update = {'key': 'Autor', 'value': []}
+
+        for subfield_zero in subfields_zero_list:
+            d_id, d_type, d_value = subfield_zero.split('^^')
+            dict_to_update['value'].append({'id': int(d_id), 'type': d_type, 'value': d_value})
+        list_to_return.append(dict_to_update)
+        return list_to_return
+    else:
+        return subfields_zero_list
+
+
+def serialize_to_list_of_values(subfields_zero_list):
+    if subfields_zero_list:
+        list_to_return = []
+
+        for subfield_zero in subfields_zero_list:
+            d_id, d_type, d_value = subfield_zero.split('^^')
+            list_to_return.append(d_value)
+
+        return list_to_return
+    else:
+        return subfields_zero_list

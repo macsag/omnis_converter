@@ -6,7 +6,7 @@ from objects.manifestation import Manifestation
 
 
 class Expression(object):
-    def __init__(self, work):
+    def __init__(self):
         self.uuid = uuid4()
         self.manifestations = []
 
@@ -32,20 +32,22 @@ class Expression(object):
         self.mock_es_data_id = None
 
     def __repr__(self):
-        return f'Expression(id={self.mock_es_id}, lang={self.expr_lang}, manifestations={self.manifestations}'
+        return f'Expression(id={self.mock_es_id}, lang={self.expr_lang})'
 
-    def add(self, manifestation):
+    def add(self, bib_object, work, buffer, descr_index, code_val_index):
         if not self.mock_es_id:
-            self.mock_es_id = str('112' + get_values_by_field(manifestation, '001')[0][1:-1])
+            self.mock_es_id = str('112' + get_values_by_field(bib_object, '001')[0][1:-1])
         if not self.expr_lang:
-            self.expr_lang = get_values_by_field(manifestation, '008')[0][35:38]
+            self.expr_lang = get_values_by_field(bib_object, '008')[0][35:38]
         if not self.expr_leader_type:
-            self.expr_leader_type = manifestation.leader[6]
-        self.materialization_ids.append(str('113' + get_values_by_field(manifestation, '001')[0][1:-1]))
-        self.instantiate_manifestation(manifestation)
+            self.expr_leader_type = bib_object.leader[6]
+        if not self.work_ids:
+            self.work_ids = [int(work.mock_es_id)]
+        self.materialization_ids.append(str('113' + get_values_by_field(bib_object, '001')[0][1:-1]))
+        self.instantiate_manifestation(bib_object, work, buffer, descr_index, code_val_index)
 
-    def instantiate_manifestation(self, manifestation):
-        self.manifestations.append(Manifestation(manifestation))
+    def instantiate_manifestation(self, bib_object, work, buffer, descr_index):
+        self.manifestations.append(Manifestation(bib_object, work, self, buffer, descr_index))
 
 
 

@@ -4,24 +4,15 @@ import json
 import pprint
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.marc_iso_commons import truncate_title_proper, get_rid_of_punctuation, read_marc_from_binary
-from commons.marc_iso_commons import is_dbn, truncate_title_from_246
+from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary, prepare_name_for_indexing
+from commons.marc_iso_commons import is_dbn, truncate_title_from_246, ObjCounter
+from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, serialize_to_list_of_values, normalize_publisher
+
 from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields
 
+from descriptor_resolver.resolve_record import resolve_field_value, only_values, resolve_code
+
 from objects.expression import Expression
-
-
-class ObjCounter(object):
-    __slots__ = 'count'
-
-    def __init__(self):
-        self.count = 0
-
-    def __repr__(self):
-        return f'TitleCounter(title_count={self.count}'
-
-    def add(self, number_to_add):
-        self.count += number_to_add
 
 
 class Work(object):
@@ -29,8 +20,8 @@ class Work(object):
         self.uuid = uuid4()
         self.mock_es_id = int()
 
-        self.main_creator = []
-        self.other_creator = []
+        self.main_creator = set()
+        self.other_creator = set()
 
         self.titles240 = set()
         self.titles245 = {}
@@ -41,14 +32,12 @@ class Work(object):
         self.language_of_orig_codes = {}
         self.language_orig = ''
 
+        self.pub_country_codes = set()
+
         self.expressions_dict = {}
 
         self.manifestations_bn_ids = set()
         self.manifestations_mak_ids = set()
-
-        self.item_ids = []
-
-        self.expressions = []
 
         # search indexes data
         self.search_adress = set()
@@ -57,14 +46,25 @@ class Work(object):
         self.search_title = set()
         self.search_subject = set()
         self.search_formal = set()
+        self.search_form = set()
+        self.search_note = set()
 
         # filters data
-        self.filter_creator = []
-        self.filter_nat_bib_year = []
+        self.filter_creator = set()
+        self.filter_cultural_group = []
+        self.filter_form = []
         self.filter_lang = []
         self.filter_lang_orig = []
         self.filter_nat_bib_code = []
-        self.filter_pub_date = []
+        self.filter_nat_bib_year = []
+        self.filter_pub_country = []
+        self.filter_pub_date = set()
+        self.filter_publisher = set()
+        self.filter_publisher_uniform = set()
+        self.filter_subject = []
+        self.filter_subject_place = []
+        self.filter_subject_time = []
+        self.filter_time_created = []
 
         # presentation data
         self.work_presentation_main_creator = []
@@ -75,9 +75,12 @@ class Work(object):
         # work data
         self.work_title_pref = ''
         self.work_title_of_orig_pref = ''
-        self.work_title_alt = []
-        self.work_title_of_orig_alt = []
+        self.work_title_alt = set()
+        self.work_title_of_orig_alt = set()
         self.work_title_index = []
+
+        self.work_main_creator = []
+        self.work_other_creator_index = []
 
         self.work_udc = set()
         self.work_time_created = []
@@ -93,28 +96,40 @@ class Work(object):
         self.work_subject_place = set()
         self.work_subject_time = []
         self.work_subject_domain = set()
+        self.work_subject_work = []
 
         # invariable data
         self.popularity_join = "owner"
         self.modificationTime = "2019-10-01T13:34:23.580"
         self.stat_digital = "false"
+        self.work_publisher_work = 'false'
+        self.metadata_source = 'REFERENCE'
 
         # helper data
         self.work_main_creator_index = []
 
         # stats
+
+        self.stat_item_count = 0
         self.stat_digital_library_count = 0
+        self.stat_library_count = 0
+        self.stat_materialization_count = 0
+        self.stat_public_domain = 0
 
         # children ids
         self.expression_ids = []
         self.materialization_ids = []
         self.item_ids = []
 
-    def __repr__(self):
-        return f'Work(id={self.uuid}, lang={self.work_title_pref}, children={self.expressions_dict.values()}'
+        # suggestions data
+        self.suggest = []
+        self.phrase_suggest = []
 
-    def get_manifestation_bn_id(self, pymarc_object):
-        self.manifestations_bn_ids.add(get_values_by_field(pymarc_object, '001')[0])
+    def __repr__(self):
+        return f'Work(id={self.uuid}, title_pref={self.work_title_pref}, children={self.expressions_dict.values()}'
+
+    def get_manifestation_bn_id(self, bib_object):
+        self.manifestations_bn_ids.add(get_values_by_field(bib_object, '001')[0])
 
     def create_mock_es_data_index_id(self):
         self.mock_es_id = str('111' + list(self.manifestations_bn_ids)[0][1:-1])
@@ -123,11 +138,13 @@ class Work(object):
         pass
 
     # 3.1.1
-    def get_main_creator(self, pymarc_object):
-        list_val_100abcd = postprocess(get_rid_of_punctuation,
-                                       get_values_by_field_and_subfield(pymarc_object, ('100', ['a', 'b', 'c', 'd'])))
-        list_val_110abcdn = get_values_by_field_and_subfield(pymarc_object, ('110', ['a', 'b', 'c', 'd', 'n']))
-        list_val_111abcdn = get_values_by_field_and_subfield(pymarc_object, ('111', ['a', 'b', 'c', 'd', 'n']))
+    def get_main_creator(self, bib_object, descr_index):
+        list_val_100abcd = postprocess(prepare_name_for_indexing,
+                                       get_values_by_field_and_subfield(bib_object, ('100', ['0'])))
+        list_val_110abcdn = postprocess(prepare_name_for_indexing,
+                                        get_values_by_field_and_subfield(bib_object, ('110', ['0'])))
+        list_val_111abcdn = postprocess(prepare_name_for_indexing,
+                                        get_values_by_field_and_subfield(bib_object, ('111', ['0'])))
 
         # validate record
         if (len(list_val_100abcd) > 1 or len(list_val_110abcdn) > 1 or len(list_val_111abcdn) > 1) or \
@@ -136,25 +153,77 @@ class Work(object):
         else:
             # 3.1.1.1
             if list_val_100abcd:
-                self.main_creator.append(list_val_100abcd[0])
+                self.main_creator.add(list_val_100abcd[0])
             if list_val_110abcdn:
-                self.main_creator.append(list_val_110abcdn[0])
+                self.main_creator.add(list_val_110abcdn[0])
             if list_val_111abcdn:
-                self.main_creator.append(list_val_111abcdn[0])
+                self.main_creator.add(list_val_111abcdn[0])
 
             # 3.1.1.2 - if there is no 1XX field, check for 7XX
             if not self.main_creator:
-                pass
+                list_val_700abcd = set()
+                list_val_710abcdn = set()
+                list_val_711abcdn = set()
+
+                list_700_fields = bib_object.get_fields('700')
+                if list_700_fields:
+                    for field in list_700_fields:
+                        e_subflds = field.get_subfields('e')
+                        if e_subflds:
+                            if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
+                                list_val_700abcd.add(
+                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                        else:
+                            list_val_700abcd.add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+                resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
+                only_values_from_list_700 = only_values(resolved_list_700)
+
+                list_710_fields = bib_object.get_fields('710')
+                if list_710_fields:
+                    for field in list_710_fields:
+                        e_subflds = field.get_subfields('e')
+                        if e_subflds:
+                            if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
+                                list_val_710abcdn.add(
+                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                        else:
+                            list_val_710abcdn.add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+                resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
+                only_values_from_list_710 = only_values(resolved_list_710)
+
+                list_711_fields = bib_object.get_fields('711')
+                if list_711_fields:
+                    for field in list_711_fields:
+                        j_subflds = field.get_subfields('j')
+                        if j_subflds:
+                            if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
+                                list_val_711abcdn.add(
+                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                        else:
+                            list_val_711abcdn.add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+                resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
+                only_values_from_list_711 = only_values(resolved_list_711)
+
+                self.main_creator.update(resolved_list_700)
+                self.main_creator.update(resolved_list_710)
+                self.main_creator.update(resolved_list_710)
 
     # 3.1.2
-    def get_other_creator(self, pymarc_object):
+    def get_other_creator(self, bib_object):
         pass
 
     # 3.1.3
-    def get_titles(self, pymarc_object):
+    def get_titles(self, bib_object):
         # get title from 245 field
-        list_val_245ab = postprocess(truncate_title_proper, get_values_by_field_and_subfield(pymarc_object, ('245', ['a', 'b'])))
-        lang_008 = get_values_by_field(pymarc_object, '008')[0][35:38]
+        list_val_245ab = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
+                                                                                             ('245', ['a', 'b'])))
+        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
 
         # validate record
         if len(list_val_245ab) > 1 or not list_val_245ab:
@@ -164,7 +233,7 @@ class Work(object):
             self.titles245.setdefault(lang_008, {}).setdefault(list_val_245ab[0], ObjCounter()).add(1)
 
         # get titles from 246 fields
-        list_fields_246 = pymarc_object.get_fields('246')
+        list_fields_246 = bib_object.get_fields('246')
         list_val_246_title_orig = []
         list_val_246_other = []
 
@@ -180,7 +249,7 @@ class Work(object):
                     list_val_246_other.append(' '.join(field.get_subfields('a', 'b')))
 
         list_val_246_title_orig = postprocess(truncate_title_from_246, list_val_246_title_orig)
-        lang_041_h = get_values_by_field_and_subfield(pymarc_object, ('041', ['h']))
+        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
 
         if len(lang_041_h) == 1 and len(list_val_246_title_orig) == 1:
             self.titles246_title_orig.setdefault(lang_041_h[0], {}).setdefault(list_val_246_title_orig[0],
@@ -191,7 +260,7 @@ class Work(object):
             self.titles246_title_other.setdefault(val, ObjCounter()).add(1)
 
         # get title from 240 field
-        list_val_240 = get_values_by_field_and_subfield(pymarc_object, ('240', ['a', 'b']))
+        list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
         self.titles240.update(list_val_240)
 
     def calculate_title_pref(self):
@@ -214,23 +283,24 @@ class Work(object):
         else:
             orig_titles_from_245 = self.titles245.get(self.language_orig)
             if orig_titles_from_245:
-                orig_titles_from_245_sorted_by_frequency = sorted(orig_titles_from_245.items(), key=lambda x: x[1].count)
+                orig_titles_from_245_sorted_by_frequency = sorted(orig_titles_from_245.items(),
+                                                                  key=lambda x: x[1].count)
                 self.work_title_of_orig_pref = orig_titles_from_245_sorted_by_frequency[0][0]
             else:
                 pass
 
-    def get_language_of_original(self, pymarc_object):
-        lang_008 = get_values_by_field(pymarc_object, '008')[0][35:38]
-        lang_041_h = get_values_by_field_and_subfield(pymarc_object, ('041', ['h']))
+    def get_language_of_original(self, bib_object):
+        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
+        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
 
         if lang_008 and not lang_041_h:
             self.language_of_orig_codes.setdefault(lang_008, ObjCounter()).add(1)
         if len(lang_041_h) == 1:
             self.language_of_orig_codes.setdefault(lang_041_h[0], ObjCounter()).add(1)
 
-    def get_languages(self, pymarc_object):
-        lang_008 = get_values_by_field(pymarc_object, '008')[0][35:38]
-        lang_041_h = get_values_by_field_and_subfield(pymarc_object, ('041', ['h']))
+    def get_languages(self, bib_object):
+        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
+        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
 
         self.language_codes.update([lang_008])
         self.language_codes.update(lang_041_h)
@@ -287,7 +357,6 @@ class Work(object):
             else:
                 candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(title))
 
-
         matched_uuids = []
 
         if candidate_works_by_245_title:
@@ -308,7 +377,6 @@ class Work(object):
                     candidate_work = works_by_uuid.get(uuid)
                     if candidate_work.main_creator == self.main_creator:
                         matched_uuids.append(uuid)
-
 
         # no candidates found - new work to add
         if len(Counter(matched_uuids)) == 0:
@@ -343,74 +411,238 @@ class Work(object):
         for title in matched_work.titles240:
             works_by_titles.setdefault(title, set()).add(matched_work.uuid)
 
-    def convert_to_work(self, manifestations_bn_by_id):
+    def get_pub_country(self, bib_object):
+        pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
+        pub_008 = pub_008[:-1] if pub_008[-1] == ' ' else pub_008
+        pub_044_a = get_values_by_field_and_subfield(bib_object, ('044', ['a']))
+
+        self.pub_country_codes.update([pub_008])
+        self.pub_country_codes.update(pub_044_a)
+
+    @staticmethod
+    def get_publishers_all(bib_object):
+        pl = get_values_by_field_and_subfield(bib_object, ('260', ['b']))
+        publishers_list = postprocess(normalize_publisher, get_values_by_field_and_subfield(bib_object, ('260', ['b'])))
+
+        return publishers_list
+
+    def get_titles_of_orig_alt(self):
+        for title_dict in self.titles246_title_orig.values():
+            for title in title_dict.keys():
+                if title != self.work_title_of_orig_pref:
+                    self.work_title_of_orig_alt.add(title)
+
+    def get_titles_alt(self):
+        for title in self.titles246_title_other.keys():
+            if title != self.work_title_of_orig_pref and title != self.work_title_pref:
+                self.work_title_alt.add(title)
+        for title_dict in self.titles245.values():
+            for title in title_dict.keys():
+                if title != self.work_title_of_orig_pref and title != self.work_title_pref:
+                    self.work_title_alt.add(title)
+
+    @staticmethod
+    def get_creators_from_manif(bib_object, descr_index):
+        list_val_700abcd = set()
+        list_val_710abcdn = set()
+        list_val_711abcdn = set()
+
+        list_700_fields = bib_object.get_fields('700')
+        if list_700_fields:
+            for field in list_700_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    if len(e_subflds) == 1 and e_subflds[0] not in ['Wyd.', 'Wydawca']:
+                        list_val_700abcd.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                    else:
+                        list_val_700abcd.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+        resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
+        only_values_from_list_700 = only_values(resolved_list_700)
+
+        list_710_fields = bib_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    if len(e_subflds) == 1 and e_subflds[0] not in ['Wyd.', 'Wydawca']:
+                        list_val_710abcdn.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
+        only_values_from_list_710 = only_values(resolved_list_710)
+
+        list_711_fields = bib_object.get_fields('711')
+        if list_711_fields:
+            for field in list_711_fields:
+                j_subflds = field.get_subfields('j')
+                if j_subflds:
+                    if len(j_subflds) == 1 and j_subflds[0] not in ['Wyd.', 'Wydawca']:
+                        list_val_711abcdn.add(
+                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+        resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
+        only_values_from_list_711 = only_values(resolved_list_711)
+
+        to_return = set()
+        to_return.update(only_values_from_list_700)
+        to_return.update(only_values_from_list_710)
+        to_return.update(only_values_from_list_711)
+
+        return list(to_return)
+
+    def get_uniform_publishers(self, bib_object, descr_index):
+        list_val_710abcdn = set()
+        list_710_fields = bib_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    if 'Wyd.' in e_subflds or 'Wydawca' in e_subflds:
+                        list_val_710abcdn.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
+        only_values_from_list_710 = only_values(resolved_list_710)
+        self.filter_publisher_uniform.update(only_values_from_list_710)
+
+    def convert_to_work(self, manifestations_bn_by_id, buffer, descr_index, code_val_index):
+        self.create_mock_es_data_index_id()
+
         # get values from all reference manifestations
         for m_id in self.manifestations_bn_ids:
 
             # get manifestation by bn id from the index and read it (they're stored as iso binary)
-            m_object = read_marc_from_binary(manifestations_bn_by_id.get(m_id))
+            bib_object = read_marc_from_binary(manifestations_bn_by_id.get(m_id))
 
             # get simple attributes, without relations to descriptors
-            self.work_udc.update(get_values_by_field_and_subfield(m_object, ('080', ['a'])))
-            self.get_language_of_original(m_object)
-            self.get_languages(m_object)
+            self.work_udc.update(get_values_by_field_and_subfield(bib_object, ('080', ['a'])))
+            self.get_language_of_original(bib_object)
+            self.get_languages(bib_object)
+            self.get_pub_country(bib_object)
 
+            # check if manifestation is catalogued using DBN - if so, get subject and genre data
+            if is_dbn(bib_object):
 
-            # check if manifestation is catalogued using DBN - if so, get subject data
-            if is_dbn(m_object):
+                self.work_subject_person.update(resolve_field_value(
+                    get_values_by_field_and_subfield(bib_object, ('600', ['a', 'b', 'c', 'd'])), descr_index))
+                self.work_subject_corporate_body.update(resolve_field_value(
+                    get_values_by_field_and_subfield(bib_object, ('610', ['a', 'b', 'c', 'd', 'n', 'p'])), descr_index))
+                self.work_subject_event.update(resolve_field_value(
+                    get_values_by_field_and_subfield(bib_object, ('611', ['a', 'b', 'c', 'd', 'n', 'p'])), descr_index))
+                self.work_subject.update(resolve_field_value(
+                    get_values_by_field_and_subfield(bib_object, ('650', ['a', 'b', 'c', 'd'])), descr_index))
+                self.work_subject_place.update(resolve_field_value(
+                    get_values_by_field_and_subfield(bib_object, ('651', ['a', 'b', 'c', 'd'])), descr_index))
+                self.work_subject_time = []
+                self.work_subject_work = []
 
-                self.work_subject_person.update(get_values_by_field_and_subfield(m_object,
-                                                                                 ('600',
-                                                                                  ['a', 'b', 'c', 'd', 'n', 'p'])))
-                self.work_subject_corporate_body.update(get_values_by_field_and_subfield(m_object,
-                                                                                         ('610',
-                                                                                          ['a', 'b', 'c', 'd',
-                                                                                           'n', 'p'])))
-                self.work_subject_event.update(get_values_by_field_and_subfield(m_object,
-                                                                                ('611',
-                                                                                 ['a', 'b', 'c', 'd', 'n', 'p'])))
-                self.work_subject.update(get_values_by_field_and_subfield(m_object,
-                                                                          ('650',
-                                                                           ['a', 'b', 'c', 'd', 'n', 'p'])))
-                self.work_subject_place.update(get_values_by_field_and_subfield(m_object,
-                                                                                ('651', ['a', 'b', 'c', 'd'])))
-                self.work_genre.update(get_values_by_field_and_subfield(m_object, ('655', ['a', 'b', 'c', 'd'])))
+                self.work_genre.update(resolve_field_value(
+                    get_values_by_field_and_subfield(bib_object, ('655', ['a', 'b', 'c', 'd'])), descr_index))
 
             # get other data related to descriptors
-            self.work_subject_domain.update(get_values_by_field_and_subfield(m_object, ('658', ['a'])))
-            self.work_form.update(get_values_by_field_and_subfield(m_object, ('380', ['a'])))
-            self.work_cultural_group.update(get_values_by_field_and_subfield(m_object, ('386', ['a'])))
+            self.work_subject_domain.update(resolve_field_value(
+                get_values_by_field_and_subfield(bib_object, ('658', ['a'])), descr_index))
+            self.work_form.update(resolve_field_value(
+                get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
+            self.work_cultural_group.update(resolve_field_value(
+                get_values_by_field_and_subfield(bib_object, ('386', ['a'])), descr_index))
+
+            self.work_main_creator = serialize_to_jsonl_descr_creator(self.main_creator)
+            self.work_main_creator_index = []  # todo
+            self.work_other_creator_index = []  # todo
+            self.work_presentation_main_creator = self.work_main_creator
+
+            self.work_time_created = []  # todo
+            self.work_title_index = []  # todo
 
             # get data and create attributes for search indexes
-            self.search_adress.update(get_values_by_field(m_object, '260'))
+            self.search_adress.update(get_values_by_field(bib_object, '260'))
 
-            self.search_identity.update(get_values_by_field_and_subfield(m_object, ('035', ['a'])))
-            self.search_identity.update(get_values_by_field_and_subfield(m_object, ('020', ['a'])))
-            self.search_identity.update(get_values_by_field(m_object, '001'))
+            self.search_identity.update(get_values_by_field_and_subfield(bib_object, ('035', ['a'])))
+            self.search_identity.update(get_values_by_field_and_subfield(bib_object, ('020', ['a'])))
+            self.search_identity.update(get_values_by_field(bib_object, '001'))
 
-            self.search_subject.update(self.work_subject, self.work_subject_place, self.work_subject_domain,
-                                       self.work_subject_corporate_body, self.work_subject_person,
-                                       self.work_subject_time, self.work_subject_event)
+            self.search_authors.update(serialize_to_list_of_values(self.main_creator))
 
-            self.search_formal.update(self.work_cultural_group, self.work_genre)
+            self.search_note.update(get_values_by_field(bib_object, '500'))
 
-            # that is quite tricky part: upsert_expression function not only instantiates and upserts expression object
+            self.search_subject.update(*[only_values(res_val_list) for res_val_list in
+                                         [self.work_subject, self.work_subject_place, self.work_subject_domain,
+                                          self.work_subject_corporate_body, self.work_subject_person,
+                                          self.work_subject_time, self.work_subject_event]])
+
+            self.search_formal.update(*[only_values(res_val_list) for res_val_list in
+                                        [self.work_cultural_group, self.work_genre]])
+
+            self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11])
+            self.filter_publisher.update(self.get_publishers_all(bib_object))
+            self.get_uniform_publishers(bib_object, descr_index)
+            self.filter_creator.update(self.get_creators_from_manif(bib_object, descr_index))
+
+
+            # that is quite tricky part: upsert_expression method not only instantiates and upserts expression object
             # (basing on the manifestation data), but also instantiates manifestation object and item object(s),
             # creates expression ids, manifestation ids, item ids and inserts them accordingly into each FRBR object
-            self.upsert_expression(m_object)
+            self.upsert_expression(bib_object, buffer, descr_index, code_val_index)
 
-            # calculate data
+        # attributes below can be calculated AFTER getting data from all manifestations
         self.calculate_lang_orig()
         self.calculate_title_of_orig_pref()
         self.calculate_title_pref()
 
-        self.create_mock_es_data_index_id()
+        self.get_titles_of_orig_alt()
+        self.get_titles_alt()
+
+        # calculate filter indexes
+        self.filter_lang.extend(resolve_code(list(self.language_codes), 'language_dict', code_val_index))
+        self.filter_lang_orig.extend(resolve_code(list(self.language_of_orig_codes.keys()), 'language_dict',
+                                                  code_val_index))
+        self.filter_creator.update(serialize_to_list_of_values(self.main_creator))
+        self.filter_nat_bib_code = []  # todo
+        self.filter_nat_bib_year = []  # todo
+        self.filter_pub_country.extend(resolve_code(list(self.pub_country_codes), 'country_dict', code_val_index))
+        self.filter_form.extend(only_values(self.work_form))
+        self.filter_cultural_group.extend(only_values(self.work_cultural_group))
+        self.filter_subject.extend(only_values(self.work_subject))
+        self.filter_subject.extend(only_values(self.work_subject_person))
+        self.filter_subject.extend(only_values(self.work_subject_corporate_body))
+        self.filter_subject.extend(only_values(self.work_subject_event))
+        self.filter_subject.extend(only_values(self.work_subject_work))
+        self.filter_subject_place.extend(only_values(self.work_subject_place))
+        self.filter_subject_time = []  # todo
+        self.filter_time_created = []  # todo
+
+        self.search_form.update(self.filter_form)
+        self.search_form.update(only_values(self.work_genre))
+
+        self.search_title.add(self.work_title_of_orig_pref)
+        self.search_title.update(self.work_title_of_orig_alt)
+        self.search_title.add(self.work_title_pref)
+        self.search_title.update(self.work_title_alt)
+
+
+        # get creator for sorting
+        self.sort_author = serialize_to_list_of_values(self.main_creator)[0]
+
+        # get data for suggestions
+        self.suggest = []  # todo
+        self.phrase_suggest = []  # todo
+
+    def get_expr_manif_item_ids_and_counts(self):
+        for expr in self.expressions_dict.values():
+            self.expression_ids.append(int(expr.mock_es_id))
+            for manif in expr.manifestations:
+                self.materialization_ids.append(int(manif.mock_es_id))
+                self.stat_materialization_count += 1
+                for item in manif.bn_items:
+                    if item:
+                        self.item_ids.append(int(item.mock_es_id))
+                        self.stat_item_count += item.item_count
 
     # 9.1
-    def upsert_expression(self, m_object):
-        list_fields_700 = m_object.get_fields('700')
-        list_fields_710 = m_object.get_fields('710')
-        list_fields_711 = m_object.get_fields('711')
+    def upsert_expression(self, bib_object, buffer, descr_index, code_val_index):
+        list_fields_700 = bib_object.get_fields('700')
+        list_fields_710 = bib_object.get_fields('710')
+        list_fields_711 = bib_object.get_fields('711')
 
         translators = set()
 
@@ -420,39 +652,98 @@ class Work(object):
                     if field.get_subfields('e')[0] in ['Tł.', 'Tł', 'Tłumaczenie']:
                         translators.add(' '.join(field.get_subfields('a', 'b', 'c', 'd')))
 
-        expr_lang = get_values_by_field(m_object, '008')[0][35:38]
-        ldr6 = m_object.leader[6]
+        expr_lang = get_values_by_field(bib_object, '008')[0][35:38]
+        ldr6 = bib_object.leader[6]
 
-        self.expressions_dict.setdefault((expr_lang, frozenset(translators), ldr6), Expression(self)).add(m_object)
+        self.expressions_dict.setdefault((expr_lang, frozenset(translators), ldr6),
+                                         Expression()).add(bib_object, self, buffer, descr_index, code_val_index)
 
-    def serialize_work_for_es_dump(self):
+    def serialize_work_for_es_work_dump(self):
         dict_work = {"_index": "work", "_type": "work", "_id": self.mock_es_id,
                      "_score": 1, "_source":
-                         {'expression_ids': [0],
-                          'filter_creator': 'todo',
-                          'filter_lang': list(self.language_codes),
-                          'filter_lang_orig': [self.language_orig],
-                          'filter_nat_bib_code': 'todo',
-                          'filter_nat_bib_year': 'todo',
-                          'filter_pub_date': 'todo',
-                          'filter_publisher': 'todo',
-                          'filter_subject': 'todo',
-                          'item_ids': 'todo',
-                          'work_udc': list(self.work_udc),
-                          'work_subject_person': list(self.work_subject_person),
-                          'work_subject_corporate_body': list(self.work_subject_corporate_body),
-                          'work_subject_event': list(self.work_subject_event),
-                          'work_subject': list(self.work_subject),
-                          'work_subject_place': list(self.work_subject_place),
+                         {'eForm': list(self.filter_form),
+                          'expression_ids': list(self.expression_ids),
+                          'filter_creator': list(self.filter_creator),
+                          'filter_cultural_group': list(self.filter_cultural_group),
+                          'filter_form': list(self.filter_form),
+                          'filter_lang': list(self.filter_lang),
+                          'filter_lang_orig': list(self.filter_lang_orig),
+                          'filter_nat_bib_code': [],
+                          'filter_nat_bib_year': [],
+                          'filter_pub_country': list(self.filter_pub_country),
+                          'filter_pub_date': list(self.filter_pub_date),
+                          'filter_publisher': list(self.filter_publisher),
+                          'filter_publisher_uniform': list(self.filter_publisher_uniform),
+                          'filter_subject': list(self.filter_subject),
+                          'filter_subject_place': list(self.filter_subject_place),
+                          'filter_subject_time': [],
+                          'filter_time_created': [],
+                          'item_ids': list(self.item_ids),
+                          'libraries': 'todo',
+                          'materialization_ids': list(self.materialization_ids),
+                          'modificationTime': self.modificationTime,
+                          'phrase_suggest': list(self.phrase_suggest),
+                          'popularity_join': self.popularity_join,
                           'search_adress': list(self.search_adress),
-                          'search_identity': list(self.search_identity),
-                          'search_subject': list(self.search_subject),
+                          'search_authors': list(self.search_authors),
+                          'search_form': list(self.search_form),
                           'search_formal': list(self.search_formal),
-                          'work_title_pref': self.work_title_pref,
+                          'search_identity': list(self.search_identity),
+                          'search_note': list(self.search_note),
+                          'search_subject': list(self.search_subject),
+                          'search_title': list(self.search_title),
+                          'sort_author': self.sort_author,
+                          'stat_digital': self.stat_digital,
+                          'stat_digital_library_count': self.stat_digital_library_count,
+                          'stat_item_count': self.stat_item_count,
+                          'stat_library_count': self.stat_library_count,
+                          'stat_materialization_count': self.stat_materialization_count,
+                          'stat_public_domain': self.stat_public_domain,
+                          'suggest': list(self.suggest),
+                          'work_cultural_group': serialize_to_jsonl_descr(list(self.work_cultural_group)),
+                          'work_form': serialize_to_jsonl_descr(list(self.work_form)),
+                          'work_genre': serialize_to_jsonl_descr(list(self.work_genre)),
+                          'work_main_creator': list(self.work_main_creator),
+                          'work_main_creator_index': list(self.work_main_creator_index),
+                          'work_other_creator_index': list(self.work_other_creator_index),
+                          'work_presentation_main_creator': list(self.work_presentation_main_creator),
+                          'work_publisher_work': self.work_publisher_work,
+                          'work_subject': serialize_to_jsonl_descr(list(self.work_subject)),
+                          'work_subject_corporate_body': serialize_to_jsonl_descr(
+                              list(self.work_subject_corporate_body)),
+                          'work_subject_domain': serialize_to_jsonl_descr(list(self.work_subject_domain)),
+                          'work_subject_event': serialize_to_jsonl_descr(list(self.work_subject_event)),
+                          'work_subject_person': serialize_to_jsonl_descr(list(self.work_subject_person)),
+                          'work_subject_place': serialize_to_jsonl_descr(list(self.work_subject_place)),
+                          'work_subject_time': list(self.work_subject_time),
+                          'work_subject_work': list(self.work_subject_work),
+                          'work_time_created': list(self.work_time_created),
+                          'work_title_alt': list(self.work_title_alt),
+                          'work_title_index': list(self.work_title_index),
+                          'work_title_of_orig_alt': list(self.work_title_of_orig_alt),
                           'work_title_of_orig_pref': self.work_title_of_orig_pref,
-
+                          'work_title_pref': self.work_title_pref,
+                          'work_udc': list(self.work_udc)
                           }}
 
         json_work = json.dumps(dict_work, ensure_ascii=False)
         pp = pprint.PrettyPrinter()
         pp.pprint(dict_work)
+
+    def serialize_work_popularity_object_for_es_work_dump(self):
+        dict_work = {"_index": "work", "_type": "work", "_id": f'p{str(self.mock_es_id)}',
+                     "_score": 1, "_routing": str(self.mock_es_id), "_source": {
+                         "modificationTime": self.modificationTime,
+                         "popularity": 0,
+                         "popularity-join": {"parent": str(self.mock_es_id), "name": "popularity"}
+                     }}
+
+        json_work = json.dumps(dict_work, ensure_ascii=False)
+        pp = pprint.PrettyPrinter()
+        pp.pprint(dict_work)
+
+    def serialize_work_for_es_work_data_dump(self):
+        # todo
+        dict_work = {"_index": "work_data", "_type": "work_data", "_id": self.mock_es_id,
+                     "_score": 1, "_source":{
+                     }}

@@ -9,4 +9,9 @@ class TooMany1xxFields(OmnisConverterException):
 
 class No245FieldFoundOrTooMany245Fields(OmnisConverterException):
     def __str__(self):
-        return 'Invalid record - no 245 field or too many 245 fields'
+        return 'Invalid record - no 245 field or too many 245 fields.'
+
+
+class DescriptorNotResolved(OmnisConverterException):
+    def __str__(self):
+        return 'Invalid record - descriptor not resolved.'
