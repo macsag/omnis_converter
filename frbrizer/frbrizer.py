@@ -136,23 +136,31 @@ def main_loop(**kwargs):
     logging.info('DONE!')
     logging.info('Conversion in progress...')
 
+    indexed_works_by_mat_nlp_id = {}
+
     for work_uuid, indexed_work in indexed_works_by_uuid.items():
+        # do conversion and upsert expressions, instantiate manifestations and BN items
         indexed_work.convert_to_work(
             indexed_manifestations_bn_by_id, kwargs['buffer'], indexed_descriptors, indexed_code_values)
+
         print(f'\n{indexed_work.mock_es_id}')
         for expr in indexed_work.expressions_dict.values():
             print(f'    {expr}')
             for manif in expr.manifestations:
+                # index works by manifestations nlp id for inserting mak+ items
+                indexed_works_by_mat_nlp_id.setdefault(manif.mat_nlp_id, indexed_work.uuid)
+
                 print(f'        {manif}')
                 for i in manif.bn_items:
                     print(f'            {i}')
-
 
     logging.info('DONE!')
 
 
     if kwargs['run_manif_matcher']:
+
         logging.info('MAK+ manifestation matching in progress...')
+
         # parse marxml data from MAK+ (one file at a time)
         parsed_xml = parse_xml_to_array('msib_rec_00001.xml')
 
@@ -166,8 +174,16 @@ def main_loop(**kwargs):
                                             index_id=indexed_manifestations_bn_by_id)
                 if match:
                     list_ava = r.get_fields('AVA')
+                    list_mak_items = []
                     for ava in list_ava:
-                        print(MakItem(ava, indexed_libs_by_mak_id))
+                        list_mak_items.append(MakItem(ava, indexed_libs_by_mak_id))
+                    w_uuid = indexed_works_by_mat_nlp_id.get(match)
+                    ref_to_work = indexed_works_by_uuid.get(w_uuid)
+                    for e in ref_to_work.expressions_dict.values():
+                        for m in e.manifestations:
+                            if m.mat_nlp_id == match:
+                                m.mak_items.extend(list_mak_items)
+                                print(m.mak_items)
 
         logging.info('DONE!')
 
@@ -194,12 +210,12 @@ if __name__ == '__main__':
 
     buff = JsonBufferOut('item_mock.json')
 
-    configs = {'file_in': 'wojna_nowe.mrc',
+    configs = {'file_in': 'bib_test_1.mrc',
                'inst_file_in': '../manager-library.json',
                'code_val_file_in': '../code_value_indexer/code_value_sql_source/001_import.sql',
                'descr_files_path_dir': '../source_files/descriptors',
                'buffer': buff,
-               'run_manif_matcher': False}
+               'run_manif_matcher': True}
 
     main_loop(**configs)
     buff.flush()
