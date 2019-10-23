@@ -73,7 +73,7 @@ class Manifestation(object):
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
-        self.mak_items = self.instantiate_mak_items(bib_object, work)
+        self.mak_items = []
 
     def __repr__(self):
         return f'Manifestation(id={self.mock_es_id}, title_and_resp={self.mat_title_and_resp}'
@@ -146,9 +146,6 @@ class Manifestation(object):
             i = BnItem(bib_object, work, self, expression, buffer)
             self.items_id.append(i_mock_es_id)
             return i
-
-    def instantiate_mak_items(self, manifestation, work):
-        pass
 
     def serialize_manifestation_for_es_dump(self):
         dict_manifestation = {"_index": "materialization", "_type": "materialization", "_id": self.mock_es_id,
