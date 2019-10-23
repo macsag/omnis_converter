@@ -175,6 +175,9 @@ def main_loop(**kwargs):
         indexed_work.get_expr_manif_item_ids_and_counts()
         indexed_work.serialize_work_for_es_work_dump()
         indexed_work.serialize_work_popularity_object_for_es_work_dump()
+        for expr in indexed_work.expressions_dict.values():
+            for manif in expr.manifestations:
+                manif.serialize_manifestation_for_es_dump()
 
     print(indexed_works_by_uuid)
     print(indexed_works_by_titles)
