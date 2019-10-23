@@ -62,13 +62,14 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
         candidates_245.update(index_245.get(mak_manif_data.title_245_with_offset))
 
     print(candidates_245)
+    match = False
 
     for candidate in list(candidates_245):
+        print(candidate)
         bn_manif_data = get_data_for_matching(read_marc_from_binary(index_id.get(candidate)))
         print(bn_manif_data)
         print(mak_manif_data)
 
-        match = None
         match_type = '245'
 
         if bn_manif_data.ldr_67 == mak_manif_data.ldr_67 and bn_manif_data.val_008_0614 == mak_manif_data.val_008_0614:
@@ -110,6 +111,7 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
                                     (last_5_char_245 and num_245 and num_pages and b_form) else False
                     if match:
                         print('There is a match!')
+                        return candidate
 
         return match
 
