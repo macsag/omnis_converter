@@ -10,7 +10,7 @@ from commons.marc_iso_commons import read_marc_from_file, get_values_by_field_an
 from commons.json_writer import JsonBufferOut
 
 from manifestation_matcher.manif_matcher import get_titles_for_manifestation_matching, match_manifestation
-from institutions_indexer.inst_indexer import create_index
+from institutions_indexer.inst_indexer import create_lib_indexes
 from code_value_indexer.code_value_indexer import code_value_indexer
 from indexers.descriptors_indexer import index_descriptors
 from descriptor_resolver.resolve_record import resolve_record
@@ -85,7 +85,7 @@ def main_loop(**kwargs):
     indexed_manifestations_bn_by_titles_490 = {}
 
     logging.info('Indexing institutions...')
-    indexed_libs_by_mak_id = create_index(kwargs['inst_file_in'])
+    indexed_libs_by_mak_id, indexed_libs_by_es_id = create_lib_indexes(kwargs['inst_file_in'])
     logging.info('DONE!')
 
     logging.info('Indexing codes and values...')
@@ -177,6 +177,7 @@ def main_loop(**kwargs):
         indexed_work.serialize_work_popularity_object_for_es_work_dump()
         for expr in indexed_work.expressions_dict.values():
             for manif in expr.manifestations:
+                manif.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
                 manif.serialize_manifestation_for_es_dump()
 
     print(indexed_works_by_uuid)
