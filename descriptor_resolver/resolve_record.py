@@ -64,6 +64,21 @@ def resolve_code(code_list, code_type, code_val_index):
         return code_list
 
 
+def resolve_code_and_serialize(code_list, code_type, code_val_index):
+    if code_list:
+        list_to_return = []
+
+        for code in code_list:
+            if code in code_val_index[code_type]:
+                val = code_val_index[code_type].get(code).get('name')
+                c_id = code_val_index[code_type].get(code).get('id')
+                list_to_return.append({'id': c_id, 'type': code_type.replace('_dict', ''), 'value': val})
+
+        return list_to_return
+    else:
+        return code_list
+
+
 def only_values(resolved_values_list):
     if resolved_values_list:
         list_to_return = []
