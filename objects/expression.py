@@ -46,8 +46,8 @@ class Expression(object):
         self.materialization_ids.append(str('113' + get_values_by_field(bib_object, '001')[0][1:-1]))
         self.instantiate_manifestation(bib_object, work, buffer, descr_index, code_val_index)
 
-    def instantiate_manifestation(self, bib_object, work, buffer, descr_index):
-        self.manifestations.append(Manifestation(bib_object, work, self, buffer, descr_index))
+    def instantiate_manifestation(self, bib_object, work, buffer, descr_index, code_val_index):
+        self.manifestations.append(Manifestation(bib_object, work, self, buffer, descr_index, code_val_index))
 
 
 
