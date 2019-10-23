@@ -1,8 +1,10 @@
 from uuid import uuid4
+import json
+import pprint
 
 from commons.marc_iso_commons import to_single_value, get_values_by_field_and_subfield, get_values_by_field
 from commons.marc_iso_commons import postprocess, truncate_title_proper
-from descriptor_resolver.resolve_record import resolve_field_value, resolve_code
+from descriptor_resolver.resolve_record import resolve_field_value, resolve_code, resolve_code_and_serialize
 
 from objects.item import BnItem
 
@@ -19,9 +21,9 @@ class Manifestation(object):
         self.expression_ids = [int(expression.mock_es_id)]
         self.items_id = []  # populated after instantiating all the manifestations and mak+ matching
         self.libraries = []  # populated after instantiating all the manifestations and mak+ matching
-        self.mat_carrier_type = resolve_code(get_values_by_field_and_subfield(bib_object, ('338', ['b'])),
-                                             'carrier_type',
-                                             code_val_index)
+        self.mat_carrier_type = resolve_code_and_serialize(get_values_by_field_and_subfield(bib_object, ('338', ['b'])),
+                                                           'carrier_type_dict',
+                                                           code_val_index)
         self.mat_contributor = ''  # todo
         self.mat_digital = 'false'
         self.mat_edition = get_values_by_field(bib_object, '250')
@@ -29,42 +31,42 @@ class Manifestation(object):
         self.mat_isbn = get_values_by_field_and_subfield(bib_object, ('020', ['a']))
         self.mat_matching_title = ''  # todo
         self.mat_material_type = ''  # todo
-        self.mat_media_type = resolve_code(get_values_by_field_and_subfield(bib_object, ('337', ['b'])),
-                                             'media_type',
-                                             code_val_index)
+        self.mat_media_type = resolve_code_and_serialize(get_values_by_field_and_subfield(bib_object, ('337', ['b'])),
+                                                         'media_type_dict',
+                                                         code_val_index)
         self.mat_nat_bib = []  # todo
         self.mat_nlp_id = to_single_value(get_values_by_field(bib_object, '001'))
-        self.mat_note = []
+        self.mat_note = []  # todo
         self.mat_number_of_pages = to_single_value(get_values_by_field_and_subfield(bib_object, ('300', ['a'])))
         self.mat_physical_info = get_values_by_field(bib_object, '300')
         self.mat_pub_city = get_values_by_field_and_subfield(bib_object, ('260', ['a']))
-        self.mat_pub_country = set()
+        self.mat_pub_country = []
         self.get_pub_country(bib_object, code_val_index)
         self.mat_pub_date_from = None
         self.mat_pub_date_single = None
         self.mat_pub_date_to = None
         self.get_mat_pub_dates(bib_object)
         self.mat_pub_info = get_values_by_field(bib_object, '260')
-        self.mat_publisher = []
-        self.mat_publisher_uniform = []
+        self.mat_publisher = []  # todo
+        self.mat_publisher_uniform = []  # todo
         self.mat_title_and_resp = get_values_by_field(bib_object, '245')
-        self.mat_title_other_info = []
+        self.mat_title_other_info = []  # todo
         self.mat_title_proper = to_single_value(
             postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object, ('245', ['a']))))
         self.mat_title_variant = get_values_by_field_and_subfield(bib_object, ('246', ['a', 'b']))
         self.metadata_original = str(uuid4())
         self.metadata_source = 'REFERENCE'
         self.modificationTime = "2019-10-01T13:34:23.580"
-        self.phrase_suggest = []
+        self.phrase_suggest = []  # todo
         self.popularity_join = "owner"
         self.stat_digital = "false"
         self.stat_digital_library_count = 0
-        self.stat_item_count = 0
-        self.stat_library_count = 0
+        self.stat_item_count = 0  # todo
+        self.stat_library_count = 0  # todo
         self.stat_public_domain = 0
-        self.suggest = []
-        self.work_creator = []
-        self.work_creators = []
+        self.suggest = []  # todo
+        self.work_creator = []  # todo
+        self.work_creators = []  # todo
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
@@ -83,7 +85,7 @@ class Manifestation(object):
         country_codes.add(pub_008)
         country_codes.update(pub_044_a)
 
-        self.mat_pub_country.update(resolve_code(list(country_codes), 'country', code_val_index))
+        self.mat_pub_country.extend(resolve_code_and_serialize(list(country_codes), 'country_dict', code_val_index))
 
     def get_mat_pub_dates(self, bib_object):
         v_008_06 = get_values_by_field(bib_object, '008')[0][6]
@@ -115,20 +117,24 @@ class Manifestation(object):
                 'item_ids': [int(i_id) for i_id in self.items_id],
                 'libraries': list(),  # todo
                 'mat_carrier_type': list(self.mat_carrier_type),
+                'mat_contributor': self.mat_contributor,
                 'mat_digital': self.mat_digital,
+                'mat_edition': self.mat_edition,
                 'mat_external_id': list(self.mat_external_id),
                 'mat_isbn': self.mat_isbn,
                 'mat_matching_title245': '',  # todo
-                'mat_media_type': list(),  # todo
+                'mat_material_type': self.mat_material_type,
+                'mat_media_type': list(self.mat_media_type),  # todo
                 'mat_nat_bib': list(),  # todo
                 'mat_nlp_id': self.mat_nlp_id,
+                'mat_note': self.mat_note,
                 'mat_number_of_pages': self.mat_number_of_pages,
                 'mat_physical_info': self.mat_physical_info,
                 'mat_pub_city': self.mat_pub_city,
                 'mat_pub_country': list(self.mat_pub_country),
-                'mat_pub_date_from': int(),
-                'mat_pub_date_single': int(),
-                'mat_pub_date_to': int(),
+                'mat_pub_date_from': self.mat_pub_date_from,
+                'mat_pub_date_single': self.mat_pub_date_single,
+                'mat_pub_date_to': self.mat_pub_date_to,
                 'mat_pub_info': self.mat_pub_info,
                 'mat_publiher': self.mat_publisher,
                 'mat_publisher_uniform': self.mat_publisher_uniform,
@@ -149,3 +155,7 @@ class Manifestation(object):
                 'work_creators': self.work_creators,
                 'work_ids': self.work_ids
             }}
+
+        json_manifestation = json.dumps(dict_manifestation, ensure_ascii=False)
+        pp = pprint.PrettyPrinter()
+        pp.pprint(dict_manifestation)
