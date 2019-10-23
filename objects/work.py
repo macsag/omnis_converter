@@ -496,9 +496,11 @@ class Work(object):
         if list_710_fields:
             for field in list_710_fields:
                 e_subflds = field.get_subfields('e')
-                if e_subflds:
-                    if 'Wyd.' in e_subflds or 'Wydawca' in e_subflds:
-                        list_val_710abcdn.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                subflds_4 = field.get_subfields('4')
+                if e_subflds or subflds_4:
+                    if 'Wyd.' in e_subflds or 'Wydawca' in e_subflds or 'pbl' in subflds_4:
+                        list_val_710abcdn.add(
+                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
         resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
         only_values_from_list_710 = only_values(resolved_list_710)
