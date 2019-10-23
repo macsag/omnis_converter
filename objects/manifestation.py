@@ -3,8 +3,9 @@ import json
 import pprint
 
 from commons.marc_iso_commons import to_single_value, get_values_by_field_and_subfield, get_values_by_field
-from commons.marc_iso_commons import postprocess, truncate_title_proper
-from descriptor_resolver.resolve_record import resolve_field_value, resolve_code, resolve_code_and_serialize
+from commons.marc_iso_commons import postprocess, truncate_title_proper, normalize_publisher
+from commons.marc_iso_commons import serialize_to_jsonl_descr
+from descriptor_resolver.resolve_record import resolve_field_value, resolve_code, resolve_code_and_serialize, only_values
 
 from objects.item import BnItem
 
@@ -16,8 +17,8 @@ class Manifestation(object):
         # attributes for manifestation_es_index
         self.mock_es_id = str('113' + to_single_value(get_values_by_field(bib_object, '001'))[1:-1])
 
-        self.eForm = resolve_field_value(
-                get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index)
+        self.eForm = only_values(resolve_field_value(
+                get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
         self.expression_ids = [int(expression.mock_es_id)]
         self.items_id = []  # populated after instantiating all the manifestations and mak+ matching
         self.libraries = []  # populated after instantiating all the manifestations and mak+ matching
@@ -47,8 +48,10 @@ class Manifestation(object):
         self.mat_pub_date_to = None
         self.get_mat_pub_dates(bib_object)
         self.mat_pub_info = get_values_by_field(bib_object, '260')
-        self.mat_publisher = []  # todo
-        self.mat_publisher_uniform = []  # todo
+        self.mat_publisher = []
+        self.get_publishers_all(bib_object)
+        self.mat_publisher_uniform = []
+        self.get_uniform_publishers(bib_object, descr_index)
         self.mat_title_and_resp = get_values_by_field(bib_object, '245')
         self.mat_title_other_info = []  # todo
         self.mat_title_proper = to_single_value(
@@ -65,8 +68,8 @@ class Manifestation(object):
         self.stat_library_count = 0  # todo
         self.stat_public_domain = 0
         self.suggest = []  # todo
-        self.work_creator = []  # todo
-        self.work_creators = []  # todo
+        self.work_creator = only_values(work.main_creator)
+        self.work_creators = only_values(work.main_creator)
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
@@ -98,6 +101,44 @@ class Manifestation(object):
             self.mat_pub_date_from = int(v_008_0710)
             self.mat_pub_date_to = int(v_008_1114)
 
+    def get_publishers_all(self, bib_object):
+        pl = get_values_by_field_and_subfield(bib_object, ('260', ['b']))
+        publishers_list = postprocess(normalize_publisher, get_values_by_field_and_subfield(bib_object, ('260', ['b'])))
+
+        self.mat_publisher = publishers_list
+
+    def get_uniform_publishers(self, bib_object, descr_index):
+        list_val_710abcdn = set()
+        list_710_fields = bib_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                subflds_4 = field.get_subfields('4')
+                if e_subflds or subflds_4:
+                    if 'Wyd.' in e_subflds or 'Wydawca' in e_subflds or 'pbl' in subflds_4:
+                        list_val_710abcdn.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
+        serialized = serialize_to_jsonl_descr(resolved_list_710)
+        self.mat_publisher_uniform.extend(serialized)
+
+    def get_resolve_and_serialize_libraries(self, lib_index):
+        for items_list in (self.bn_items, self.mak_items):
+            if items_list:
+                for item in items_list:
+                    id_to_get = item.library['id']
+                    if int(id_to_get) == 10947:
+                        self.libraries.append({'digital': 'false',
+                                               'localization': {"lon": 21.0055165, "lat": 52.2140166},
+                                               'country': 'Polska',
+                                               'province': 'mazowieckie',
+                                               'city': 'Warszawa',
+                                               'name': 'Biblioteka Narodowa',
+                                               'id': 10947})
+                    lib = lib_index.get(id_to_get)
+                    if lib:
+                        self.libraries.append(lib.get_serialized())
+
     def instantiate_bn_items(self, bib_object, work, expression, buffer):
         list_852_fields = bib_object.get_fields('852')
         if list_852_fields:
@@ -112,10 +153,10 @@ class Manifestation(object):
     def serialize_manifestation_for_es_dump(self):
         dict_manifestation = {"_index": "materialization", "_type": "materialization", "_id": self.mock_es_id,
                               "_score": 1, "_source": {
-                'eForm': list(),
+                'eForm': self.eForm,
                 'expression_ids': list(self.expression_ids),
                 'item_ids': [int(i_id) for i_id in self.items_id],
-                'libraries': list(),  # todo
+                'libraries': self.libraries,
                 'mat_carrier_type': list(self.mat_carrier_type),
                 'mat_contributor': self.mat_contributor,
                 'mat_digital': self.mat_digital,
@@ -124,7 +165,7 @@ class Manifestation(object):
                 'mat_isbn': self.mat_isbn,
                 'mat_matching_title245': '',  # todo
                 'mat_material_type': self.mat_material_type,
-                'mat_media_type': list(self.mat_media_type),  # todo
+                'mat_media_type': list(self.mat_media_type),
                 'mat_nat_bib': list(),  # todo
                 'mat_nlp_id': self.mat_nlp_id,
                 'mat_note': self.mat_note,
