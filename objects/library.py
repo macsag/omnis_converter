@@ -9,3 +9,12 @@ class Library(object):
 
     def __repr__(self):
         return f'Library(es_id={self.es_id}, mak_plus_id={self.mak_plus_id})'
+
+    def get_serialized(self):
+        return {'digital': self.source['digital'],
+                'localization': self.source['localization'],
+                'country': self.source['country'],
+                'province': self.source['province'],
+                'city': self.source['city'],
+                'name': self.source['name'],
+                'id': self.es_id}
