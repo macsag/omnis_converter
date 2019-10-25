@@ -86,6 +86,7 @@ def main_loop(**kwargs):
 
     logging.info('Indexing institutions...')
     indexed_libs_by_mak_id, indexed_libs_by_es_id = create_lib_indexes(kwargs['inst_file_in'])
+    print(indexed_libs_by_es_id)
     logging.info('DONE!')
 
     logging.info('Indexing codes and values...')
@@ -165,36 +166,56 @@ def main_loop(**kwargs):
         parsed_xml = parse_xml_to_array('msib_rec_00001.xml')
 
         # loop through MAK+ bib records from the file
-        for r in parsed_xml:
+        for r in tqdm(parsed_xml):
             # check if it is not None - there are some problems with parsing
             if r:
                 # try to match with BN manifestation
-                match = match_manifestation(r,
-                                            index_245=indexed_manifestations_bn_by_titles_245,
-                                            index_id=indexed_manifestations_bn_by_id)
+                try:
+                    match = match_manifestation(r,
+                                                index_245=indexed_manifestations_bn_by_titles_245,
+                                                index_id=indexed_manifestations_bn_by_id)
+                except IndexError as e:
+                    print(e)
+                    continue
+
                 if match:
                     list_ava = r.get_fields('AVA')
                     list_mak_items = []
-                    for ava in list_ava:
-                        list_mak_items.append(MakItem(ava, indexed_libs_by_mak_id))
+
                     w_uuid = indexed_works_by_mat_nlp_id.get(match)
                     ref_to_work = indexed_works_by_uuid.get(w_uuid)
+
+                    # this is definitely not a best way to do it
                     for e in ref_to_work.expressions_dict.values():
                         for m in e.manifestations:
                             if m.mat_nlp_id == match:
-                                m.mak_items.extend(list_mak_items)
-                                print(m.mak_items)
+                                for num, ava in enumerate(list_ava, start=1):
+                                    it_to_add = MakItem(ava, indexed_libs_by_mak_id, ref_to_work,
+                                                                  e, m, buff, num)
+                                    if it_to_add.item_local_bib_id not in m.mak_items:
+                                        m.mak_items.setdefault(it_to_add.item_local_bib_id, it_to_add)
+                                    else:
+                                        m.mak_items.get(it_to_add.item_local_bib_id).add(it_to_add)
 
         logging.info('DONE!')
 
-    for indexed_work in indexed_works_by_uuid.values():
-        indexed_work.get_expr_manif_item_ids_and_counts()
-        indexed_work.serialize_work_for_es_work_dump()
-        indexed_work.serialize_work_popularity_object_for_es_work_dump()
+    for indexed_work in tqdm(indexed_works_by_uuid.values()):
         for expr in indexed_work.expressions_dict.values():
+
             for manif in expr.manifestations:
+
+                for num, it in enumerate(manif.mak_items.values(), start=1):
+                    it.mock_es_id = str(num) + manif.mock_es_id
+                    it.write_to_dump_file(buff)
                 manif.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
-                manif.serialize_manifestation_for_es_dump()
+                manif.get_mak_item_ids()
+                manif.write_to_dump_file(buff)
+
+            expr.get_item_ids_item_count_and_libraries()
+            expr.write_to_dump_file(buff)
+
+        indexed_work.get_expr_manif_item_ids_and_counts()
+        indexed_work.write_to_dump_file(buff)
 
     print(indexed_works_by_uuid)
     print(indexed_works_by_titles)
@@ -208,7 +229,8 @@ if __name__ == '__main__':
     logging.root.addHandler(logging.StreamHandler(sys.stdout))
     logging.root.setLevel(level=logging.DEBUG)
 
-    buff = JsonBufferOut('item_mock.json')
+    buff = JsonBufferOut('../output/item.json', '../output/materialization.json', '../output/expression.json',
+                         '../output/work.json', '../output/expression_data.json', '../output/work_data.json')
 
     configs = {'file_in': 'bib_test_1.mrc',
                'inst_file_in': '../manager-library.json',
