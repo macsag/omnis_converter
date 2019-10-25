@@ -2,8 +2,14 @@ from commons.marc_iso_commons import ObjCounter
 
 
 class JsonBufferOut(object):
-    def __init__(self, item_file_out):
+    def __init__(self, item_file_out, manif_file_out, expr_file_out,
+                 work_file_out, expr_data_file_out, work_data_file_out):
         self.item_buffer = [item_file_out, ObjCounter(), []]
+        self.manif_buffer = [manif_file_out, ObjCounter(), []]
+        self.expr_buffer = [expr_file_out, ObjCounter(), []]
+        self.work_buffer = [work_file_out, ObjCounter(), []]
+        self.expr_data_buffer = [expr_data_file_out, ObjCounter(), []]
+        self.work_data_buffer = [work_data_file_out, ObjCounter(), []]
 
     def flush(self):
         for b in self.__dict__.values():
