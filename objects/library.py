@@ -13,8 +13,8 @@ class Library(object):
     def get_serialized(self):
         return {'digital': self.source['digital'],
                 'localization': self.source['localization'],
-                'country': self.source['country'],
+                'country': 'Polska',
                 'province': self.source['province'],
                 'city': self.source['city'],
                 'name': self.source['name'],
-                'id': self.es_id}
+                'id': int(self.es_id)}
