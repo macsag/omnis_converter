@@ -5,6 +5,9 @@ import pprint
 from commons.marc_iso_commons import to_single_value, get_values_by_field_and_subfield, get_values_by_field
 from commons.marc_iso_commons import postprocess, truncate_title_proper, normalize_publisher
 from commons.marc_iso_commons import serialize_to_jsonl_descr
+
+from commons.json_writer import write_to_json
+
 from descriptor_resolver.resolve_record import resolve_field_value, resolve_code, resolve_code_and_serialize, only_values
 
 from objects.item import BnItem
@@ -20,13 +23,13 @@ class Manifestation(object):
         self.eForm = only_values(resolve_field_value(
                 get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
         self.expression_ids = [int(expression.mock_es_id)]
-        self.items_id = []  # populated after instantiating all the manifestations and mak+ matching
+        self.item_ids = []  # populated after instantiating all the manifestations and mak+ matching
         self.libraries = []  # populated after instantiating all the manifestations and mak+ matching
         self.mat_carrier_type = resolve_code_and_serialize(get_values_by_field_and_subfield(bib_object, ('338', ['b'])),
                                                            'carrier_type_dict',
                                                            code_val_index)
-        self.mat_contributor = ''  # todo
-        self.mat_digital = 'false'
+        self.mat_contributor = []  # todo
+        self.mat_digital = False
         self.mat_edition = get_values_by_field(bib_object, '250')
         self.mat_external_id = get_values_by_field_and_subfield(bib_object, ('035', ['a']))
         self.mat_isbn = get_values_by_field_and_subfield(bib_object, ('020', ['a']))
@@ -55,25 +58,25 @@ class Manifestation(object):
         self.mat_title_and_resp = get_values_by_field(bib_object, '245')
         self.mat_title_other_info = []  # todo
         self.mat_title_proper = to_single_value(
-            postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object, ('245', ['a']))))
+            postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object, ('245', ['a', 'b']))))
         self.mat_title_variant = get_values_by_field_and_subfield(bib_object, ('246', ['a', 'b']))
         self.metadata_original = str(uuid4())
         self.metadata_source = 'REFERENCE'
         self.modificationTime = "2019-10-01T13:34:23.580"
-        self.phrase_suggest = []  # todo
+        self.phrase_suggest = [self.mat_title_proper]  # todo
         self.popularity_join = "owner"
-        self.stat_digital = "false"
+        self.stat_digital = False
         self.stat_digital_library_count = 0
-        self.stat_item_count = 0  # todo
-        self.stat_library_count = 0  # todo
-        self.stat_public_domain = 0
-        self.suggest = []  # todo
+        self.stat_item_count = 0
+        self.stat_library_count = 0
+        self.stat_public_domain = False
+        self.suggest = [self.mat_title_proper]  # todo
         self.work_creator = only_values(work.main_creator)
         self.work_creators = only_values(work.main_creator)
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
-        self.mak_items = []
+        self.mak_items = {}
 
     def __repr__(self):
         return f'Manifestation(id={self.mock_es_id}, title_and_resp={self.mat_title_and_resp}'
@@ -123,36 +126,55 @@ class Manifestation(object):
         self.mat_publisher_uniform.extend(serialized)
 
     def get_resolve_and_serialize_libraries(self, lib_index):
-        for items_list in (self.bn_items, self.mak_items):
-            if items_list:
-                for item in items_list:
-                    id_to_get = item.library['id']
-                    if int(id_to_get) == 10947:
-                        self.libraries.append({'digital': 'false',
-                                               'localization': {"lon": 21.0055165, "lat": 52.2140166},
-                                               'country': 'Polska',
-                                               'province': 'mazowieckie',
-                                               'city': 'Warszawa',
-                                               'name': 'Biblioteka Narodowa',
-                                               'id': 10947})
-                    lib = lib_index.get(id_to_get)
-                    if lib:
-                        self.libraries.append(lib.get_serialized())
+        if self.bn_items:
+            for item in self.bn_items:
+                id_to_get = item.library['id']
+                if int(id_to_get) == 10947:
+                    self.libraries.append({'digital': False,
+                                           'localization': {"lon": 21.0055165, "lat": 52.2140166},
+                                           'country': 'Polska',
+                                           'province': 'mazowieckie',
+                                           'city': 'Warszawa',
+                                           'name': 'Biblioteka Narodowa',
+                                           'id': 10947})
+                lib = lib_index.get(str(id_to_get))
+                if lib:
+                    self.libraries.append(lib.get_serialized())
+        if self.mak_items:
+            for item in self.mak_items.values():
+                id_to_get = item.library['id']
+                lib = lib_index.get(str(id_to_get))
+                if lib:
+                    self.libraries.append(lib.get_serialized())
+
+        self.get_library_count()
+
+    def get_library_count(self):
+        self.stat_library_count = len(self.libraries)
 
     def instantiate_bn_items(self, bib_object, work, expression, buffer):
         list_852_fields = bib_object.get_fields('852')
         if list_852_fields:
             i_mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:-1])
             i = BnItem(bib_object, work, self, expression, buffer)
-            self.items_id.append(i_mock_es_id)
+            self.item_ids.append(i_mock_es_id)
+            self.stat_item_count += i.item_count
             return i
+
+    def get_mak_item_ids(self):
+        for item in self.mak_items.values():
+            self.item_ids.append(item.mock_es_id)
+            self.stat_item_count += item.item_count
+
+    def write_to_dump_file(self, buffer):
+        write_to_json(self.serialize_manifestation_for_es_dump(), buffer, 'manif_buffer')
 
     def serialize_manifestation_for_es_dump(self):
         dict_manifestation = {"_index": "materialization", "_type": "materialization", "_id": self.mock_es_id,
                               "_score": 1, "_source": {
                 'eForm': self.eForm,
                 'expression_ids': list(self.expression_ids),
-                'item_ids': [int(i_id) for i_id in self.items_id],
+                'item_ids': [int(i_id) for i_id in self.item_ids],
                 'libraries': self.libraries,
                 'mat_carrier_type': list(self.mat_carrier_type),
                 'mat_contributor': self.mat_contributor,
@@ -195,5 +217,5 @@ class Manifestation(object):
             }}
 
         json_manifestation = json.dumps(dict_manifestation, ensure_ascii=False)
-        pp = pprint.PrettyPrinter()
-        pp.pprint(dict_manifestation)
+
+        return json_manifestation
