@@ -7,10 +7,11 @@ from commons.marc_iso_commons import get_values_by_field_and_subfield, get_value
 from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary, prepare_name_for_indexing
 from commons.marc_iso_commons import is_dbn, truncate_title_from_246, ObjCounter
 from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, serialize_to_list_of_values, normalize_publisher
+from commons.json_writer import write_to_json
 
 from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields
 
-from descriptor_resolver.resolve_record import resolve_field_value, only_values, resolve_code
+from descriptor_resolver.resolve_record import resolve_field_value, only_values, resolve_code, resolve_code_and_serialize
 
 from objects.expression import Expression
 
@@ -31,6 +32,7 @@ class Work(object):
         self.language_codes = set()
         self.language_of_orig_codes = {}
         self.language_orig = ''
+        self.language_orig_obj = None
 
         self.pub_country_codes = set()
 
@@ -38,6 +40,8 @@ class Work(object):
 
         self.manifestations_bn_ids = set()
         self.manifestations_mak_ids = set()
+
+        self.libraries = []
 
         # search indexes data
         self.search_adress = set()
@@ -101,8 +105,8 @@ class Work(object):
         # invariable data
         self.popularity_join = "owner"
         self.modificationTime = "2019-10-01T13:34:23.580"
-        self.stat_digital = "false"
-        self.work_publisher_work = 'false'
+        self.stat_digital = False
+        self.work_publisher_work = False
         self.metadata_source = 'REFERENCE'
 
         # helper data
@@ -114,7 +118,7 @@ class Work(object):
         self.stat_digital_library_count = 0
         self.stat_library_count = 0
         self.stat_materialization_count = 0
-        self.stat_public_domain = 0
+        self.stat_public_domain = False
 
         # children ids
         self.expression_ids = []
@@ -594,6 +598,8 @@ class Work(object):
         self.get_titles_of_orig_alt()
         self.get_titles_alt()
 
+        self.language_orig_obj = resolve_code_and_serialize([self.language_orig], 'language_dict', code_val_index)
+
         # calculate filter indexes
         self.filter_lang.extend(resolve_code(list(self.language_codes), 'language_dict', code_val_index))
         self.filter_lang_orig.extend(resolve_code(list(self.language_of_orig_codes.keys()), 'language_dict',
@@ -626,19 +632,25 @@ class Work(object):
         self.sort_author = serialize_to_list_of_values(self.main_creator)[0]
 
         # get data for suggestions
-        self.suggest = []  # todo
-        self.phrase_suggest = []  # todo
+        self.suggest = [self.work_title_pref]  # todo
+        self.phrase_suggest = [self.work_title_pref]  # todo
 
     def get_expr_manif_item_ids_and_counts(self):
+        lib_ids = set()
+
         for expr in self.expressions_dict.values():
             self.expression_ids.append(int(expr.mock_es_id))
-            for manif in expr.manifestations:
-                self.materialization_ids.append(int(manif.mock_es_id))
-                self.stat_materialization_count += 1
-                for item in manif.bn_items:
-                    if item:
-                        self.item_ids.append(int(item.mock_es_id))
-                        self.stat_item_count += item.item_count
+            self.materialization_ids.extend(expr.materialization_ids)
+            self.stat_materialization_count = len(self.materialization_ids)
+            self.item_ids.extend(expr.item_ids)
+            self.stat_item_count += expr.item_count
+
+            for lib in expr.libraries:
+                if lib['id'] not in lib_ids:
+                    self.libraries.append(lib)
+                    lib_ids.add(lib['id'])
+
+        self.stat_library_count = len(self.libraries)
 
     # 9.1
     def upsert_expression(self, bib_object, buffer, descr_index, code_val_index):
@@ -659,6 +671,13 @@ class Work(object):
 
         self.expressions_dict.setdefault((expr_lang, frozenset(translators), ldr6),
                                          Expression()).add(bib_object, self, buffer, descr_index, code_val_index)
+
+    def write_to_dump_file(self, buffer):
+        write_to_json(self.serialize_work_for_es_work_dump(), buffer, 'work_buffer')
+        write_to_json(self.serialize_work_popularity_object_for_es_work_dump(), buffer, 'work_buffer')
+
+        for jsonl in self.serialize_work_for_es_work_data_dump():
+            write_to_json(jsonl, buffer, 'work_data_buffer')
 
     def serialize_work_for_es_work_dump(self):
         dict_work = {"_index": "work", "_type": "work", "_id": self.mock_es_id,
@@ -681,7 +700,7 @@ class Work(object):
                           'filter_subject_time': [],
                           'filter_time_created': [],
                           'item_ids': list(self.item_ids),
-                          'libraries': 'todo',
+                          'libraries': self.libraries,
                           'materialization_ids': list(self.materialization_ids),
                           'modificationTime': self.modificationTime,
                           'phrase_suggest': list(self.phrase_suggest),
@@ -732,6 +751,8 @@ class Work(object):
         pp = pprint.PrettyPrinter()
         pp.pprint(dict_work)
 
+        return json_work
+
     def serialize_work_popularity_object_for_es_work_dump(self):
         dict_work = {"_index": "work", "_type": "work", "_id": f'p{str(self.mock_es_id)}',
                      "_score": 1, "_routing": str(self.mock_es_id), "_source": {
@@ -744,8 +765,39 @@ class Work(object):
         pp = pprint.PrettyPrinter()
         pp.pprint(dict_work)
 
+        return json_work
+
     def serialize_work_for_es_work_data_dump(self):
-        # todo
-        dict_work = {"_index": "work_data", "_type": "work_data", "_id": self.mock_es_id,
-                     "_score": 1, "_source":{
-                     }}
+        dict_work_data_list = []
+
+        for num1, expr in enumerate(self.expressions_dict.values(), start=1):
+            for num2, m in enumerate(expr.manifestations, start=1):
+
+                dict_work_data = {"_index": "work_data", "_type": "work_data",
+                                  "_id": f'{num2}{num1}{self.mock_es_id}',
+                                  "_score": 1, "_source": {
+                                      'metadata_original': m.metadata_original,
+                                      'metadata_source': self.metadata_source,
+                                      'modificationTime': self.modificationTime,
+                                      'phrase_suggest': ['-'],
+                                      'suggest': ['-'],
+                                      'work_form': expr.expr_form,
+                                      'work_language_of_orig': self.language_orig_obj,
+                                      'work_main_creator': self.work_main_creator,
+                                      'work_materialization':
+                                         {'id': int(m.mock_es_id),
+                                          'type': 'materialization',
+                                          'value': str(m.mock_es_id)},
+                                      'work_multi_work': False,
+                                      'work_subject_jhp': [],
+                                      'work_time_created': [],
+                                      'work_title': expr.expr_title,
+                                      'work_work':
+                                          {'id': int(self.mock_es_id),
+                                          'type': 'work',
+                                          'value': str(self.mock_es_id)}}}
+
+                json_work_data = json.dumps(dict_work_data, ensure_ascii=False)
+                dict_work_data_list.append(json_work_data)
+
+            return dict_work_data_list
