@@ -101,11 +101,9 @@ class Expression(object):
                                'modificationTime': self.modificationTime,
                                'phrase_suggest': self.phrase_suggest,
                                'suggest': self.suggest,
-                               'work_ids':self.work_ids}}
+                               'work_ids': self.work_ids}}
 
         json_expr = json.dumps(dict_expression, ensure_ascii=False)
-        pp = pprint.PrettyPrinter()
-        pp.pprint(dict_expression)
 
         return json_expr
 
@@ -118,7 +116,7 @@ class Expression(object):
                                     "_id": f'{num}{self.mock_es_id}', "_score": 1, "_source": {
                                         'expr_expression':
                                             {'id': int(self.mock_es_id),
-                                             'type': 'materialization',
+                                             'type': 'expression',
                                              'value': str(self.mock_es_id)},
                                         'expr_form': self.expr_form,
                                         'expr_lang': self.expr_lang,
