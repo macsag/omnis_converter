@@ -136,26 +136,20 @@ class Work(object):
         self.manifestations_bn_ids.add(get_values_by_field(bib_object, '001')[0])
 
     def create_mock_es_data_index_id(self):
-        self.mock_es_id = str('111' + list(self.manifestations_bn_ids)[0][1:-1])
-
-    def create_mock_es_data_work_index_id(self):
-        pass
+        self.mock_es_id = str('111' + list(self.manifestations_bn_ids)[0][1:])
 
     # 3.1.1
     def get_main_creator(self, bib_object, descr_index):
-        list_val_100abcd = postprocess(prepare_name_for_indexing,
-                                       get_values_by_field_and_subfield(bib_object, ('100', ['0'])))
-        list_val_110abcdn = postprocess(prepare_name_for_indexing,
-                                        get_values_by_field_and_subfield(bib_object, ('110', ['0'])))
-        list_val_111abcdn = postprocess(prepare_name_for_indexing,
-                                        get_values_by_field_and_subfield(bib_object, ('111', ['0'])))
+        list_val_100abcd = get_values_by_field_and_subfield(bib_object, ('100', ['0']))
+        list_val_110abcdn = get_values_by_field_and_subfield(bib_object, ('110', ['0']))
+        list_val_111abcdn = get_values_by_field_and_subfield(bib_object, ('111', ['0']))
 
         # validate record
         if (len(list_val_100abcd) > 1 or len(list_val_110abcdn) > 1 or len(list_val_111abcdn) > 1) or \
                 (list_val_100abcd and list_val_110abcdn and list_val_111abcdn):
             raise TooMany1xxFields
         else:
-            # 3.1.1.1
+            # 3.1.1.1 [CHECKED]
             if list_val_100abcd:
                 self.main_creator.add(list_val_100abcd[0])
             if list_val_110abcdn:
@@ -163,7 +157,7 @@ class Work(object):
             if list_val_111abcdn:
                 self.main_creator.add(list_val_111abcdn[0])
 
-            # 3.1.1.2 - if there is no 1XX field, check for 7XX
+            # 3.1.1.2 - if there is no 1XX field, check for 7XX [CHECKED]
             if not self.main_creator:
                 list_val_700abcd = set()
                 list_val_710abcdn = set()
@@ -182,45 +176,49 @@ class Work(object):
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
                 resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-                only_values_from_list_700 = only_values(resolved_list_700)
+                #only_values_from_list_700 = only_values(resolved_list_700)
+
+                self.main_creator.update(resolved_list_700)
 
                 list_710_fields = bib_object.get_fields('710')
                 if list_710_fields:
                     for field in list_710_fields:
                         e_subflds = field.get_subfields('e')
+                        subflds_4 = field.get_subfields('4')
                         if e_subflds:
                             if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
                                 list_val_710abcdn.add(
                                     ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-                        else:
+                        if not e_subflds and not subflds_4:
                             list_val_710abcdn.add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
                 resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-                only_values_from_list_710 = only_values(resolved_list_710)
+                #only_values_from_list_710 = only_values(resolved_list_710)
+
+                self.main_creator.update(resolved_list_710)
 
                 list_711_fields = bib_object.get_fields('711')
                 if list_711_fields:
                     for field in list_711_fields:
                         j_subflds = field.get_subfields('j')
+                        subflds_4 = field.get_subfields('4')
                         if j_subflds:
                             if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
                                 list_val_711abcdn.add(
                                     ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-                        else:
+                        if not e_subflds and not subflds_4:
                             list_val_711abcdn.add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
                 resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-                only_values_from_list_711 = only_values(resolved_list_711)
+                #only_values_from_list_711 = only_values(resolved_list_711)
 
-                self.main_creator.update(resolved_list_700)
-                self.main_creator.update(resolved_list_710)
-                self.main_creator.update(resolved_list_710)
+                self.main_creator.update(resolved_list_711)
 
     # 3.1.2
     def get_other_creator(self, bib_object):
-        pass
+        pass  # todo
 
     # 3.1.3
     def get_titles(self, bib_object):
@@ -361,29 +359,31 @@ class Work(object):
             else:
                 candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(title))
 
-        matched_uuids = []
+        matched_uuids = set()
 
         if candidate_works_by_245_title:
             for title, uuids_list in candidate_works_by_245_title.items():
                 for uuid in uuids_list:
                     candidate_work = works_by_uuid.get(uuid)
                     if candidate_work.main_creator == self.main_creator:
-                        matched_uuids.append(uuid)
+                        matched_uuids.add(uuid)
         if candidate_works_by_246_title_orig:
             for title, uuids_list in candidate_works_by_246_title_orig.items():
                 for uuid in uuids_list:
                     candidate_work = works_by_uuid.get(uuid)
                     if candidate_work.main_creator == self.main_creator:
-                        matched_uuids.append(uuid)
+                        matched_uuids.add(uuid)
         if candidate_works_by_240_title:
             for title, uuids_list in candidate_works_by_240_title.items():
                 for uuid in uuids_list:
                     candidate_work = works_by_uuid.get(uuid)
                     if candidate_work.main_creator == self.main_creator:
-                        matched_uuids.append(uuid)
+                        matched_uuids.add(uuid)
+
+        matched_uuids = list(matched_uuids)
 
         # no candidates found - new work to add
-        if len(Counter(matched_uuids)) == 0:
+        if len(matched_uuids) == 0:
             # index new work by titles and by uuid
             for title_dict in self.titles245.values():
                 for title in title_dict.keys():
@@ -398,11 +398,16 @@ class Work(object):
             print('Added new work.')
 
         # one candidate found - merge with existing work and index by all titles
-        if len(Counter(matched_uuids)) == 1:
+        if len(matched_uuids) == 1:
             matched_work = works_by_uuid.get(matched_uuids[0])
             self.merge_titles(matched_work)
             self.merge_manif_bn_ids(matched_work)
             self.index_matched_work_by_titles(matched_work, works_by_titles)
+            print('One candidate found - merged works.')
+
+        # more than one candidate found
+        if len(matched_uuids) > 1:
+            print(f'{len(matched_uuids)} candidates found.')
 
     @staticmethod
     def index_matched_work_by_titles(matched_work, works_by_titles):
@@ -579,7 +584,7 @@ class Work(object):
             self.search_formal.update(*[only_values(res_val_list) for res_val_list in
                                         [self.work_cultural_group, self.work_genre]])
 
-            self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11])
+            self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0'))
             self.filter_publisher.update(self.get_publishers_all(bib_object))
             self.get_uniform_publishers(bib_object, descr_index)
             self.filter_creator.update(self.get_creators_from_manif(bib_object, descr_index))
@@ -627,9 +632,8 @@ class Work(object):
         self.search_title.add(self.work_title_pref)
         self.search_title.update(self.work_title_alt)
 
-
         # get creator for sorting
-        self.sort_author = serialize_to_list_of_values(self.main_creator)[0]
+        self.sort_author = list(serialize_to_list_of_values(self.main_creator))[0]
 
         # get data for suggestions
         self.suggest = [self.work_title_pref]  # todo
@@ -704,7 +708,7 @@ class Work(object):
                           'materialization_ids': list(self.materialization_ids),
                           'modificationTime': self.modificationTime,
                           'phrase_suggest': list(self.phrase_suggest),
-                          'popularity_join': self.popularity_join,
+                          'popularity-join': self.popularity_join,
                           'search_adress': list(self.search_adress),
                           'search_authors': list(self.search_authors),
                           'search_form': list(self.search_form),
@@ -748,8 +752,6 @@ class Work(object):
                           }}
 
         json_work = json.dumps(dict_work, ensure_ascii=False)
-        pp = pprint.PrettyPrinter()
-        pp.pprint(dict_work)
 
         return json_work
 
@@ -762,8 +764,6 @@ class Work(object):
                      }}
 
         json_work = json.dumps(dict_work, ensure_ascii=False)
-        pp = pprint.PrettyPrinter()
-        pp.pprint(dict_work)
 
         return json_work
 
