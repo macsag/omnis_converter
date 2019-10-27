@@ -1,5 +1,4 @@
 import json
-import pprint
 from uuid import uuid4
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
