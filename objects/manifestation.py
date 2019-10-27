@@ -1,6 +1,5 @@
 from uuid import uuid4
 import json
-import pprint
 
 from commons.marc_iso_commons import to_single_value, get_values_by_field_and_subfield, get_values_by_field
 from commons.marc_iso_commons import postprocess, truncate_title_proper, normalize_publisher
@@ -8,7 +7,7 @@ from commons.marc_iso_commons import serialize_to_jsonl_descr
 
 from commons.json_writer import write_to_json
 
-from descriptor_resolver.resolve_record import resolve_field_value, resolve_code, resolve_code_and_serialize, only_values
+from descriptor_resolver.resolve_record import resolve_field_value, resolve_code_and_serialize, only_values
 
 from objects.item import BnItem
 
@@ -18,7 +17,7 @@ class Manifestation(object):
         self.uuid = uuid4()
 
         # attributes for manifestation_es_index
-        self.mock_es_id = str('113' + to_single_value(get_values_by_field(bib_object, '001'))[1:-1])
+        self.mock_es_id = str('113' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
 
         self.eForm = only_values(resolve_field_value(
                 get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
@@ -96,11 +95,11 @@ class Manifestation(object):
     def get_mat_pub_dates(self, bib_object):
         v_008_06 = get_values_by_field(bib_object, '008')[0][6]
         if v_008_06 in ['r', 's', 'p', 't']:
-            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0')
+            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0')
             self.mat_pub_date_single = int(v_008_0710)
         else:
-            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0')
-            v_008_1114 = get_values_by_field(bib_object, '008')[0][11:15].replace('u', '0')
+            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0')
+            v_008_1114 = get_values_by_field(bib_object, '008')[0][11:15].replace('u', '0').replace(' ', '0')
             self.mat_pub_date_from = int(v_008_0710)
             self.mat_pub_date_to = int(v_008_1114)
 
@@ -155,7 +154,7 @@ class Manifestation(object):
     def instantiate_bn_items(self, bib_object, work, expression, buffer):
         list_852_fields = bib_object.get_fields('852')
         if list_852_fields:
-            i_mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:-1])
+            i_mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
             i = BnItem(bib_object, work, self, expression, buffer)
             self.item_ids.append(i_mock_es_id)
             self.stat_item_count += i.item_count
@@ -168,6 +167,19 @@ class Manifestation(object):
 
     def write_to_dump_file(self, buffer):
         write_to_json(self.serialize_manifestation_for_es_dump(), buffer, 'manif_buffer')
+        write_to_json(self.serialize_manifestation_popularity_object_for_es_work_dump(), buffer, 'manif_buffer')
+
+    def serialize_manifestation_popularity_object_for_es_work_dump(self):
+        dict_manifestation = {"_index": "materialization", "_type": "materialization", "_id": f'p{str(self.mock_es_id)}',
+                     "_score": 1, "_routing": str(self.mock_es_id), "_source": {
+                         "modificationTime": self.modificationTime,
+                         "popularity": 0,
+                         "popularity-join": {"parent": str(self.mock_es_id), "name": "popularity"}
+                     }}
+
+        json_manifestation = json.dumps(dict_manifestation, ensure_ascii=False)
+
+        return json_manifestation
 
     def serialize_manifestation_for_es_dump(self):
         dict_manifestation = {"_index": "materialization", "_type": "materialization", "_id": self.mock_es_id,
@@ -196,7 +208,7 @@ class Manifestation(object):
                 'mat_pub_date_single': self.mat_pub_date_single,
                 'mat_pub_date_to': self.mat_pub_date_to,
                 'mat_pub_info': self.mat_pub_info,
-                'mat_publiher': self.mat_publisher,
+                'mat_publisher': self.mat_publisher,
                 'mat_publisher_uniform': self.mat_publisher_uniform,
                 'mat_title_and_resp': self.mat_title_and_resp,
                 'mat_title_proper': self.mat_title_proper,
