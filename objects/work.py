@@ -644,9 +644,9 @@ class Work(object):
 
         for expr in self.expressions_dict.values():
             self.expression_ids.append(int(expr.mock_es_id))
-            self.materialization_ids.extend(expr.materialization_ids)
+            self.materialization_ids.extend([int(m_id) for m_id in list(expr.materialization_ids)])
             self.stat_materialization_count = len(self.materialization_ids)
-            self.item_ids.extend(expr.item_ids)
+            self.item_ids.extend([int(i_id) for i_id in list(expr.item_ids)])
             self.stat_item_count += expr.item_count
 
             for lib in expr.libraries:
