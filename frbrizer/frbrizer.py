@@ -229,7 +229,7 @@ def main_loop(**kwargs):
             for manif in expr.manifestations:
 
                 for num, it in enumerate(manif.mak_items.values(), start=1):
-                    it.mock_es_id = str(num) + manif.mock_es_id
+                    it.mock_es_id = str(num) + str(manif.mock_es_id)
                     it.write_to_dump_file(buff)
 
                 manif.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
@@ -269,7 +269,7 @@ if __name__ == '__main__':
                'descr_files_path_dir': '../source_files/descriptors',
                'buffer': buff,
                'run_manif_matcher': True,
-               'limit': 25000}
+               'limit': 30000}
 
     main_loop(**configs)
     buff.flush()
