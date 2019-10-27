@@ -13,9 +13,18 @@ from objects.item import BnItem
 
 
 class Manifestation(object):
-    def __init__(self, bib_object, work, expression, buffer, descr_index, code_val_index):
-        self.uuid = uuid4()
+    __slots__ = ['mock_es_id', 'eForm', 'expression_ids', 'item_ids', 'libraries', 'mat_carrier_type',
+                 'mat_contributor', 'mat_digital', 'mat_edition', 'mat_external_id', 'mat_isbn',
+                 'mat_matching_title', 'mat_material_type', 'mat_media_type', 'mat_nat_bib', 'mat_nlp_id',
+                 'mat_note', 'mat_number_of_pages', 'mat_physical_info', 'mat_pub_city', 'mat_pub_country',
+                 'mat_pub_date_from', 'mat_pub_date_single', 'mat_pub_date_to', 'mat_pub_info', 'mat_publisher',
+                 'mat_publisher_uniform', 'mat_title_and_resp', 'mat_title_other_info', 'mat_title_proper',
+                 'mat_title_variant', 'metadata_original', 'metadata_source', 'modificationTime', 'phrase_suggest',
+                 'popularity_join', 'stat_digital', 'stat_digital_library_count', 'stat_item_count',
+                 'stat_library_count', 'stat_public_domain', 'suggest', 'work_creator', 'work_creators',
+                 'work_ids', 'bn_items', 'mak_items']
 
+    def __init__(self, bib_object, work, expression, buffer, descr_index, code_val_index):
         # attributes for manifestation_es_index
         self.mock_es_id = str('113' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
 
@@ -156,13 +165,13 @@ class Manifestation(object):
         if list_852_fields:
             i_mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
             i = BnItem(bib_object, work, self, expression, buffer)
-            self.item_ids.append(i_mock_es_id)
+            self.item_ids.append(int(i_mock_es_id))
             self.stat_item_count += i.item_count
             return i
 
     def get_mak_item_ids(self):
         for item in self.mak_items.values():
-            self.item_ids.append(item.mock_es_id)
+            self.item_ids.append(int(item.mock_es_id))
             self.stat_item_count += item.item_count
 
     def write_to_dump_file(self, buffer):
@@ -186,7 +195,7 @@ class Manifestation(object):
                               "_score": 1, "_source": {
                 'eForm': self.eForm,
                 'expression_ids': list(self.expression_ids),
-                'item_ids': [int(i_id) for i_id in self.item_ids],
+                'item_ids': [int(i_id) for i_id in list(self.item_ids)],
                 'libraries': self.libraries,
                 'mat_carrier_type': list(self.mat_carrier_type),
                 'mat_contributor': self.mat_contributor,
