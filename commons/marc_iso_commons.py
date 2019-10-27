@@ -66,6 +66,10 @@ def normalize_publisher(val):
     return val[:-1] if val[-1] == ',' else val
 
 
+def normalize_edition_for_matching(value):
+    return value.replace(' ', '').replace('.', '').replace('[', '').replace(']', '').replace(',', '')
+
+
 def get_rid_of_punctuation(value):
     return ''.join(char.replace(',', '').replace('.', '') for char in value)
 
