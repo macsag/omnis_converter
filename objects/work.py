@@ -703,7 +703,7 @@ class Work(object):
                           'filter_subject_place': list(self.filter_subject_place),
                           'filter_subject_time': [],
                           'filter_time_created': [],
-                          'item_ids': list(self.item_ids),
+                          'item_ids': [int(i_id) for i_id in list(self.item_ids)],
                           'libraries': self.libraries,
                           'materialization_ids': list(self.materialization_ids),
                           'modificationTime': self.modificationTime,
@@ -800,4 +800,4 @@ class Work(object):
                 json_work_data = json.dumps(dict_work_data, ensure_ascii=False)
                 dict_work_data_list.append(json_work_data)
 
-            return dict_work_data_list
+        return dict_work_data_list
