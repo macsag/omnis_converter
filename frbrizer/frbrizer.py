@@ -86,7 +86,6 @@ def main_loop(**kwargs):
 
     logging.info('Indexing institutions...')
     indexed_libs_by_mak_id, indexed_libs_by_es_id = create_lib_indexes(kwargs['inst_file_in'])
-    print(indexed_libs_by_es_id)
     logging.info('DONE!')
 
     logging.info('Indexing codes and values...')
@@ -101,21 +100,29 @@ def main_loop(**kwargs):
     logging.info('Starting main loop...')
     logging.info('FRBRrization in progress...')
 
+    # used for limit and stats
+    counter = 0
+
     for bib in tqdm(read_marc_from_file(kwargs['file_in'])):
         if is_book_ebook_audiobook(bib) and is_single_work(bib) and has_items(bib):
+            if counter == kwargs['limit']:
+                break
 
             try:
                 bib = resolve_record(bib, indexed_descriptors)
-            except DescriptorNotResolved as e:
-                logging.error(e)
+            except DescriptorNotResolved as error:
+                #logging.error(error)
                 continue
 
             # create work and get from manifestation data needed for work matching
             work = Work()
             work.get_manifestation_bn_id(bib)
             work.get_main_creator(bib, indexed_descriptors)
+            if not work.main_creator:
+                continue
             work.get_other_creator(bib)
             work.get_titles(bib)
+            counter += 1
 
             # try to match with existing work (and if there is a match: merge to one work and index by all titles)
             # if there is no match, index new work by titles and by uuid
@@ -139,24 +146,24 @@ def main_loop(**kwargs):
 
     indexed_works_by_mat_nlp_id = {}
 
-    for work_uuid, indexed_work in indexed_works_by_uuid.items():
+    for work_uuid, indexed_work in tqdm(indexed_works_by_uuid.items()):
         # do conversion and upsert expressions, instantiate manifestations and BN items
         indexed_work.convert_to_work(
             indexed_manifestations_bn_by_id, kwargs['buffer'], indexed_descriptors, indexed_code_values)
 
-        print(f'\n{indexed_work.mock_es_id}')
+        #print(f'\n{indexed_work.mock_es_id}')
         for expr in indexed_work.expressions_dict.values():
-            print(f'    {expr}')
+            #print(f'    {expr}')
             for manif in expr.manifestations:
                 # index works by manifestations nlp id for inserting mak+ items
                 indexed_works_by_mat_nlp_id.setdefault(manif.mat_nlp_id, indexed_work.uuid)
 
-                print(f'        {manif}')
-                for i in manif.bn_items:
-                    print(f'            {i}')
+                #print(f'        {manif}')
+                #for i in manif.bn_items:
+                    #pass
+                    #print(f'            {i}')
 
     logging.info('DONE!')
-
 
     if kwargs['run_manif_matcher']:
 
@@ -173,9 +180,10 @@ def main_loop(**kwargs):
                 try:
                     match = match_manifestation(r,
                                                 index_245=indexed_manifestations_bn_by_titles_245,
+                                                index_490=indexed_manifestations_bn_by_titles_490,
                                                 index_id=indexed_manifestations_bn_by_id)
-                except IndexError as e:
-                    print(e)
+                except IndexError as error:
+                    #print(error)
                     continue
 
                 if match:
@@ -186,30 +194,53 @@ def main_loop(**kwargs):
                     ref_to_work = indexed_works_by_uuid.get(w_uuid)
 
                     # this is definitely not a best way to do it
-                    for e in ref_to_work.expressions_dict.values():
-                        for m in e.manifestations:
-                            if m.mat_nlp_id == match:
-                                for num, ava in enumerate(list_ava, start=1):
-                                    it_to_add = MakItem(ava, indexed_libs_by_mak_id, ref_to_work,
-                                                                  e, m, buff, num)
-                                    if it_to_add.item_local_bib_id not in m.mak_items:
-                                        m.mak_items.setdefault(it_to_add.item_local_bib_id, it_to_add)
-                                    else:
-                                        m.mak_items.get(it_to_add.item_local_bib_id).add(it_to_add)
+                    if ref_to_work:
+                        for e in ref_to_work.expressions_dict.values():
+                            for m in e.manifestations:
+                                if m.mat_nlp_id == match:
+                                    logging.debug('Adding mak_items...')
+                                    item_counter = 0
+                                    item_add_counter = 0
+                                    for num, ava in enumerate(list_ava, start=1):
+                                        try:
+                                            it_to_add = MakItem(ava, indexed_libs_by_mak_id, ref_to_work,
+                                                                e, m, buff, num)
+                                            if it_to_add.item_local_bib_id not in m.mak_items:
+                                                logging.debug(f'Added new mak_item - {num}')
+                                                m.mak_items.setdefault(it_to_add.item_local_bib_id, it_to_add)
+                                                item_counter += 1
+                                            else:
+                                                existing_it = m.mak_items.get(it_to_add.item_local_bib_id)
+                                                existing_it.add(it_to_add)
+                                                logging.debug(f'Increased item_count in existing mak_item - {num}.')
+                                                item_add_counter += 1
+                                        except AttributeError as error:
+                                            print(error)
+                                            continue
+                                    logging.debug(f'Added {item_counter} new mak_items, increased count {item_add_counter} times.')
 
         logging.info('DONE!')
 
     for indexed_work in tqdm(indexed_works_by_uuid.values()):
+        print(f'\n{indexed_work.mock_es_id}')
         for expr in indexed_work.expressions_dict.values():
+            print(f'    {expr}')
 
             for manif in expr.manifestations:
 
                 for num, it in enumerate(manif.mak_items.values(), start=1):
                     it.mock_es_id = str(num) + manif.mock_es_id
                     it.write_to_dump_file(buff)
+
                 manif.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
                 manif.get_mak_item_ids()
                 manif.write_to_dump_file(buff)
+                print(f'        {manif}')
+
+                for i in manif.bn_items:
+                    print(f'            BN - {i}')
+                for im in manif.mak_items.values():
+                    print(f'            MAK - {im}')
 
             expr.get_item_ids_item_count_and_libraries()
             expr.write_to_dump_file(buff)
@@ -217,11 +248,11 @@ def main_loop(**kwargs):
         indexed_work.get_expr_manif_item_ids_and_counts()
         indexed_work.write_to_dump_file(buff)
 
-    print(indexed_works_by_uuid)
-    print(indexed_works_by_titles)
-    print(indexed_manifestations_bn_by_id)
-    print(indexed_manifestations_bn_by_titles_245)
-    print(indexed_manifestations_bn_by_titles_490)
+    #print(indexed_works_by_uuid)
+    #print(indexed_works_by_titles)
+    #print(indexed_manifestations_bn_by_id)
+    #print(indexed_manifestations_bn_by_titles_245)
+    #print(indexed_manifestations_bn_by_titles_490)
 
 
 if __name__ == '__main__':
@@ -232,12 +263,13 @@ if __name__ == '__main__':
     buff = JsonBufferOut('../output/item.json', '../output/materialization.json', '../output/expression.json',
                          '../output/work.json', '../output/expression_data.json', '../output/work_data.json')
 
-    configs = {'file_in': 'bib_test_1.mrc',
+    configs = {'file_in': 'bibs-ksiazka.marc',
                'inst_file_in': '../manager-library.json',
                'code_val_file_in': '../code_value_indexer/code_value_sql_source/001_import.sql',
                'descr_files_path_dir': '../source_files/descriptors',
                'buffer': buff,
-               'run_manif_matcher': True}
+               'run_manif_matcher': True,
+               'limit': 25000}
 
     main_loop(**configs)
     buff.flush()
