@@ -17,7 +17,7 @@ class BnItem(object):
     def __init__(self, bib_object, work, manifestation, expression, buffer):
 
         # attributes for item_es_index
-        self.mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:-1])
+        self.mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
         self.expression_ids = [str(expression.mock_es_id)]
         self.item_call_number = get_values_by_field_and_subfield(bib_object, ('852', ['h']))
         self.item_count = len(get_values_by_field(bib_object, '852'))
