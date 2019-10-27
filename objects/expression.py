@@ -44,7 +44,7 @@ class Expression(object):
 
     def add(self, bib_object, work, buffer, descr_index, code_val_index):
         if not self.mock_es_id:
-            self.mock_es_id = str('112' + get_values_by_field(bib_object, '001')[0][1:-1])
+            self.mock_es_id = str('112' + get_values_by_field(bib_object, '001')[0][1:])
         if not self.expr_form:
             self.expr_form = serialize_to_jsonl_descr(resolve_field_value(
                 get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
@@ -61,7 +61,7 @@ class Expression(object):
         if not self.expr_work:
             self.expr_work = {'id': int(work.mock_es_id), 'type': 'work', 'value': str(work.mock_es_id)}
 
-        self.materialization_ids.append(int('113' + get_values_by_field(bib_object, '001')[0][1:-1]))
+        self.materialization_ids.append(int('113' + get_values_by_field(bib_object, '001')[0][1:]))
         self.instantiate_manifestation(bib_object, work, buffer, descr_index, code_val_index)
 
     def instantiate_manifestation(self, bib_object, work, buffer, descr_index, code_val_index):
