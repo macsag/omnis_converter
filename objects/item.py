@@ -115,7 +115,7 @@ class MakItem(object):
         self.item_count += mak_item.item_count
 
     def serialize_to_es_dump(self):
-        dict_item = {"_index": "item", "_type": "item", "_id": self.mock_es_id,
+        dict_item = {"_index": "item", "_type": "item", "_id": str(self.mock_es_id),
                      "_score": 1, "_source":
                          {"expression_ids": self.expression_ids,
                           "item_count": self.item_count,
