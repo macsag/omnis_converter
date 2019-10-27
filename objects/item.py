@@ -9,6 +9,11 @@ from commons.json_writer import write_to_json
 
 
 class BnItem(object):
+    __slots__ = ['mock_es_id', 'expression_ids', 'item_call_number', 'item_count', 'item_deleted_id',
+                 'item_local_bib_id', 'item_local_id', 'item_location', 'item_mat_id', 'item_source',
+                 'item_status', 'item_url', 'item_work_id', 'library', 'metadata_original',
+                 'metadata_source', 'modification_time', 'phrase_suggest', 'suggest', 'work_ids']
+
     def __init__(self, bib_object, work, manifestation, expression, buffer):
 
         # attributes for item_es_index
@@ -70,6 +75,11 @@ class BnItem(object):
 
 
 class MakItem(object):
+    __slots__ = ['mock_es_id', 'expression_ids', 'item_count',
+                 'item_local_bib_id', 'item_mat_id', 'item_publication', 'item_service_url', 'item_source',
+                 'item_status', 'item_unavailable_count', 'item_url', 'item_work_id', 'library', 'metadata_original',
+                 'metadata_source', 'modification_time', 'creation_time', 'phrase_suggest', 'suggest', 'work_ids']
+
     def __init__(self, ava_field, library_index, work, expression, manifestation, buffer, num):
 
         # attributes for manifestation_es_index
