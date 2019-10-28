@@ -118,9 +118,7 @@ def main_loop(**kwargs):
             work = Work()
             work.get_manifestation_bn_id(bib)
             work.get_main_creator(bib, indexed_descriptors)
-            if not work.main_creator:
-                continue
-            work.get_other_creator(bib)
+            work.get_other_creator(bib, indexed_descriptors)
             work.get_titles(bib)
             counter += 1
 
@@ -222,9 +220,9 @@ def main_loop(**kwargs):
         logging.info('DONE!')
 
     for indexed_work in tqdm(indexed_works_by_uuid.values()):
-        print(f'\n{indexed_work.mock_es_id}')
+        #print(f'\n{indexed_work.mock_es_id}')
         for expr in indexed_work.expressions_dict.values():
-            print(f'    {expr}')
+            #print(f'    {expr}')
 
             for manif in expr.manifestations:
 
@@ -235,12 +233,12 @@ def main_loop(**kwargs):
                 manif.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
                 manif.get_mak_item_ids()
                 manif.write_to_dump_file(buff)
-                print(f'        {manif}')
+                #print(f'        {manif}')
 
-                for i in manif.bn_items:
-                    print(f'            BN - {i}')
-                for im in manif.mak_items.values():
-                    print(f'            MAK - {im}')
+                #for i in manif.bn_items:
+                    #print(f'            BN - {i}')
+                #for im in manif.mak_items.values():
+                    #print(f'            MAK - {im}')
 
             expr.get_item_ids_item_count_and_libraries()
             expr.write_to_dump_file(buff)
@@ -269,7 +267,7 @@ if __name__ == '__main__':
                'descr_files_path_dir': '../source_files/descriptors',
                'buffer': buff,
                'run_manif_matcher': True,
-               'limit': 30000}
+               'limit': 200000}
 
     main_loop(**configs)
     buff.flush()
