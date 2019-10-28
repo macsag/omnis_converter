@@ -79,8 +79,9 @@ class Manifestation(object):
         self.stat_library_count = 0
         self.stat_public_domain = False
         self.suggest = [self.mat_title_proper]  # todo
-        self.work_creator = only_values(work.main_creator)
-        self.work_creators = only_values(work.main_creator)
+        self.work_creator = []
+        self.work_creators = []
+        self.get_work_creators(work)
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
@@ -88,6 +89,14 @@ class Manifestation(object):
 
     def __repr__(self):
         return f'Manifestation(id={self.mock_es_id}, title_and_resp={self.mat_title_and_resp}'
+
+    def get_work_creators(self, work):
+        if work.main_creator:
+            self.work_creator = only_values(work.main_creator)
+            self.work_creators = only_values(work.main_creator)
+        if work.other_creator:
+            self.work_creator = only_values(work.other_creator)
+            self.work_creators = only_values(work.other_creator)
 
     def get_pub_country(self, bib_object, code_val_index):
         pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
