@@ -1,10 +1,8 @@
 from uuid import uuid4
-from collections import Counter
 import json
-import pprint
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary, prepare_name_for_indexing
+from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary
 from commons.marc_iso_commons import is_dbn, truncate_title_from_246, ObjCounter
 from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, serialize_to_list_of_values, normalize_publisher
 from commons.json_writer import write_to_json
@@ -17,6 +15,24 @@ from objects.expression import Expression
 
 
 class Work(object):
+    __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'titles240', 'titles245',
+                 'titles246_title_orig', 'titles246_title_other', 'language_codes', 'language_of_orig_codes',
+                 'language_orig', 'language_orig_obj', 'pub_country_codes', 'expressions_dict',
+                 'manifestations_bn_ids', 'manifestations_mak_ids', 'libraries', 'search_adress', 'search_authors',
+                 'search_identity', 'search_title', 'search_subject', 'search_formal', 'search_form', 'search_note',
+                 'filter_creator', 'filter_cultural_group', 'filter_form', 'filter_lang', 'filter_lang_orig',
+                 'filter_nat_bib_code', 'filter_nat_bib_year', 'filter_pub_country', 'filter_pub_date',
+                 'filter_publisher', 'filter_publisher_uniform', 'filter_subject', 'filter_subject_place',
+                 'filter_subject_time', 'filter_time_created', 'work_presentation_main_creator', 'sort_author',
+                 'work_title_pref', 'work_title_of_orig_pref', 'work_title_alt', 'work_title_of_orig_alt',
+                 'work_title_index', 'work_main_creator', 'work_other_creator_index', 'work_udc', 'work_time_created',
+                 'work_form', 'work_genre', 'work_cultural_group', 'work_subject_person', 'work_subject_corporate_body',
+                 'work_subject_event', 'work_subject', 'work_subject_place', 'work_subject_time', 'work_subject_domain',
+                 'work_subject_work', 'popularity_join', 'modificationTime', 'stat_digital', 'work_publisher_work',
+                 'metadata_source', 'work_main_creator_index', 'stat_item_count', 'stat_digital_library_count',
+                 'stat_library_count', 'stat_materialization_count', 'stat_public_domain', 'expression_ids',
+                 'materialization_ids', 'item_ids', 'suggest', 'phrase_suggest']
+
     def __init__(self):
         self.uuid = uuid4()
         self.mock_es_id = int()
@@ -176,7 +192,7 @@ class Work(object):
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
                 resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-                #only_values_from_list_700 = only_values(resolved_list_700)
+                # only_values_from_list_700 = only_values(resolved_list_700)
 
                 self.main_creator.update(resolved_list_700)
 
@@ -188,13 +204,13 @@ class Work(object):
                         if e_subflds:
                             if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
                                 list_val_710abcdn.add(
-                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
                         if not e_subflds and not subflds_4:
                             list_val_710abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
                 resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-                #only_values_from_list_710 = only_values(resolved_list_710)
+                # only_values_from_list_710 = only_values(resolved_list_710)
 
                 self.main_creator.update(resolved_list_710)
 
@@ -206,23 +222,77 @@ class Work(object):
                         if j_subflds:
                             if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
                                 list_val_711abcdn.add(
-                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                                    ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
                         if not e_subflds and not subflds_4:
                             list_val_711abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
                 resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-                #only_values_from_list_711 = only_values(resolved_list_711)
+                # only_values_from_list_711 = only_values(resolved_list_711)
 
                 self.main_creator.update(resolved_list_711)
 
     # 3.1.2
-    def get_other_creator(self, bib_object):
-        pass  # todo
+    def get_other_creator(self, bib_object, descr_index):
+        if not self.main_creator:
+            list_val_700abcd = set()
+            list_val_710abcdn = set()
+            list_val_711abcdn = set()
+
+            list_700_fields = bib_object.get_fields('700')
+            if list_700_fields:
+                for field in list_700_fields:
+                    e_subflds = field.get_subfields('e')
+                    if e_subflds:
+                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
+                            list_val_700abcd.add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+            resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
+            # only_values_from_list_700 = only_values(resolved_list_700)
+
+            self.other_creator.update(resolved_list_700)
+
+            list_710_fields = bib_object.get_fields('710')
+            if list_710_fields:
+                for field in list_710_fields:
+                    e_subflds = field.get_subfields('e')
+                    if e_subflds:
+                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
+                            list_val_710abcdn.add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+            resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
+            # only_values_from_list_710 = only_values(resolved_list_710)
+
+            self.other_creator.update(resolved_list_710)
+
+            list_711_fields = bib_object.get_fields('711')
+            if list_711_fields:
+                for field in list_711_fields:
+                    j_subflds = field.get_subfields('j')
+                    if j_subflds:
+                        j_sub_joined = ' '.join(j_sub for j_sub in j_subflds)
+                        if 'Red' in j_sub_joined or 'Oprac' in j_sub_joined or 'Wybór' in j_sub_joined:
+                            list_val_711abcdn.add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+            resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
+            # only_values_from_list_711 = only_values(resolved_list_711)
+
+            self.other_creator.update(resolved_list_711)
+        else:
+            pass
 
     # 3.1.3
     def get_titles(self, bib_object):
         # get title from 245 field
+        title_245_raw = bib_object.get_fields('245')
+        if title_245_raw:
+            title_245_raw = title_245_raw[0]
+
         list_val_245ab = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
                                                                                              ('245', ['a', 'b'])))
         lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
@@ -230,9 +300,16 @@ class Work(object):
         # validate record
         if len(list_val_245ab) > 1 or not list_val_245ab:
             raise No245FieldFoundOrTooMany245Fields
+
         # append title
         else:
-            self.titles245.setdefault(lang_008, {}).setdefault(list_val_245ab[0], ObjCounter()).add(1)
+            try:
+                self.titles245.setdefault(lang_008, {}).setdefault(list_val_245ab[0][int(title_245_raw.indicators[1]):],
+                                                                   ObjCounter()).add(1)
+            except ValueError as err:
+                print(err)
+                self.titles245.setdefault(lang_008, {}).setdefault(list_val_245ab[0],
+                                                                   ObjCounter()).add(1)
 
         # get titles from 246 fields
         list_fields_246 = bib_object.get_fields('246')
@@ -262,8 +339,17 @@ class Work(object):
             self.titles246_title_other.setdefault(val, ObjCounter()).add(1)
 
         # get title from 240 field
-        list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
-        self.titles240.update(list_val_240)
+        title_240_raw = bib_object.get_fields('240')
+        if title_240_raw:
+            title_240_raw = title_240_raw[0]
+
+            list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
+
+            try:
+                self.titles240.update(list_val_240[0][int(title_240_raw.indicators[1]):])
+            except ValueError as err:
+                print(err)
+                self.titles240.update(list_val_240[0])
 
     def calculate_title_pref(self):
         polish_titles = self.titles245.get('pol')
@@ -322,7 +408,11 @@ class Work(object):
                 matched_work.titles246_title_orig.setdefault(title_lang,
                                                              {}).setdefault(title,
                                                                             ObjCounter()).add(title_count.count)
+
         matched_work.titles240.update(self.titles240)
+
+        for title, title_count in self.titles246_title_other.items():
+            matched_work.titles246_title_other.setdefault(title, ObjCounter()).add(title_count.count)
 
     def merge_manif_bn_ids(self, matched_work):
         matched_work.manifestations_bn_ids.update(self.manifestations_bn_ids)
@@ -351,6 +441,14 @@ class Work(object):
                 else:
                     candidate_works_by_246_title_orig.setdefault(title, []).extend(works_by_titles.get(title))
 
+        for title in self.titles246_title_other.keys():
+            # no such title - append empty list
+            if title not in works_by_titles:
+                candidate_works_by_246_title_other.setdefault(title, [])
+            # title found - append candidate uuids
+            else:
+                candidate_works_by_246_title_other.setdefault(title, []).extend(works_by_titles.get(title))
+
         for title in list(self.titles240):
             # no such title - append empty list
             if title not in works_by_titles:
@@ -365,19 +463,52 @@ class Work(object):
             for title, uuids_list in candidate_works_by_245_title.items():
                 for uuid in uuids_list:
                     candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator == self.main_creator:
+                    if candidate_work.main_creator:
+                        if candidate_work.main_creator == self.main_creator:
+                            matched_uuids.add(uuid)
+                    if candidate_work.other_creator:
+                        if candidate_work.other_creator == self.other_creator:
+                            matched_uuids.add(uuid)
+                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
+
         if candidate_works_by_246_title_orig:
             for title, uuids_list in candidate_works_by_246_title_orig.items():
                 for uuid in uuids_list:
                     candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator == self.main_creator:
+                    if candidate_work.main_creator:
+                        if candidate_work.main_creator == self.main_creator:
+                            matched_uuids.add(uuid)
+                    if candidate_work.other_creator:
+                        if candidate_work.other_creator == self.other_creator:
+                            matched_uuids.add(uuid)
+                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
+
         if candidate_works_by_240_title:
             for title, uuids_list in candidate_works_by_240_title.items():
                 for uuid in uuids_list:
                     candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator == self.main_creator:
+                    if candidate_work.main_creator:
+                        if candidate_work.main_creator == self.main_creator:
+                            matched_uuids.add(uuid)
+                    if candidate_work.other_creator:
+                        if candidate_work.other_creator == self.other_creator:
+                            matched_uuids.add(uuid)
+                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
+                        matched_uuids.add(uuid)
+
+        if candidate_works_by_246_title_other:
+            for title, uuids_list in candidate_works_by_246_title_other.items():
+                for uuid in uuids_list:
+                    candidate_work = works_by_uuid.get(uuid)
+                    if candidate_work.main_creator:
+                        if candidate_work.main_creator == self.main_creator:
+                            matched_uuids.add(uuid)
+                    if candidate_work.other_creator:
+                        if candidate_work.other_creator == self.other_creator:
+                            matched_uuids.add(uuid)
+                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
 
         matched_uuids = list(matched_uuids)
@@ -392,6 +523,8 @@ class Work(object):
                 for title in title_dict.keys():
                     works_by_titles.setdefault(title, set()).add(self.uuid)
             for title in self.titles240:
+                works_by_titles.setdefault(title, set()).add(self.uuid)
+            for title in self.titles246_title_other.keys():
                 works_by_titles.setdefault(title, set()).add(self.uuid)
 
             works_by_uuid.setdefault(self.uuid, self)
@@ -418,6 +551,8 @@ class Work(object):
             for title in title_dict.keys():
                 works_by_titles.setdefault(title, set()).add(matched_work.uuid)
         for title in matched_work.titles240:
+            works_by_titles.setdefault(title, set()).add(matched_work.uuid)
+        for title in matched_work.titles246_title_other.keys():
             works_by_titles.setdefault(title, set()).add(matched_work.uuid)
 
     def get_pub_country(self, bib_object):
@@ -633,7 +768,10 @@ class Work(object):
         self.search_title.update(self.work_title_alt)
 
         # get creator for sorting
-        self.sort_author = list(serialize_to_list_of_values(self.main_creator))[0]
+        if self.main_creator:
+            self.sort_author = list(serialize_to_list_of_values(self.main_creator))[0]
+        if self.other_creator:
+            self.sort_author = list(serialize_to_list_of_values(self.other_creator))[0]
 
         # get data for suggestions
         self.suggest = [self.work_title_pref]  # todo
@@ -783,7 +921,7 @@ class Work(object):
                                       'suggest': ['-'],
                                       'work_form': expr.expr_form,
                                       'work_language_of_orig': self.language_orig_obj,
-                                      'work_main_creator': self.work_main_creator,
+                                      'work_main_creator': list(self.work_main_creator),
                                       'work_materialization':
                                          {'id': int(m.mock_es_id),
                                           'type': 'materialization',
