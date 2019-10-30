@@ -3,7 +3,7 @@ import json
 import re
 
 from commons.marc_iso_commons import to_single_value, get_values_by_field_and_subfield, get_values_by_field
-from commons.marc_iso_commons import ObjCounter, postprocess
+from commons.marc_iso_commons import postprocess
 
 from commons.json_writer import write_to_json
 
