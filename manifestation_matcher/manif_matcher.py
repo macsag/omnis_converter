@@ -1,13 +1,9 @@
 import re
-from collections import namedtuple
 
 from commons.marc_iso_commons import get_values_by_field, get_values_by_field_and_subfield, read_marc_from_binary
 from commons.marc_iso_commons import normalize_edition_for_matching, postprocess
 
-ManifMatchData = namedtuple('ManifMatchData', ['ldr_67', 'val_008_0614', 'isbn_020_az', 'title_245',
-                                               'title_245_no_offset', 'title_245_with_offset', 'titles_490',
-                                               'numbers_from_title_245', 'place_pub_260_a_first_word',
-                                               'num_of_pages_300_a', 'b_format', 'edition'])
+from objects.helper_objects import ManifMatchData
 
 
 def get_data_for_matching(manifestation):
@@ -65,70 +61,63 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
     if cand_2_245:
         candidates_245.update(cand_2_245)
 
-    print(candidates_245)
     match = False
 
     matched_from_245_with_edition = set()
     matched_from_245_without_edition = set()
 
     for candidate in list(candidates_245):
-        print(candidate)
         bn_manif_data = get_data_for_matching(read_marc_from_binary(index_id.get(candidate)))
-        print(bn_manif_data)
-        print(mak_manif_data)
-
-        match_type = '245'
 
         if bn_manif_data.ldr_67 == mak_manif_data.ldr_67 and bn_manif_data.val_008_0614 == mak_manif_data.val_008_0614:
-            if match_type == '245':
-                if (bn_manif_data.isbn_020_az and mak_manif_data.isbn_020_az and \
-                   bn_manif_data.isbn_020_az != mak_manif_data.isbn_020_az and \
-                   len(set(bn_manif_data.isbn_020_az) | set(mak_manif_data.isbn_020_az)) <= \
-                   len(bn_manif_data.isbn_020_az) and \
-                   len(set(bn_manif_data.isbn_020_az) | set(mak_manif_data.isbn_020_az)) <= \
-                   len(mak_manif_data.isbn_020_az)) or (not bn_manif_data.isbn_020_az or not \
-                   mak_manif_data.isbn_020_az):
-                    print('ISBN case 1')
-                    last_5_char_245 = bn_manif_data.title_245[-5:] == mak_manif_data.title_245[-5:]
-                    num_245 = bn_manif_data.numbers_from_title_245 == mak_manif_data.numbers_from_title_245
-                    place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
-                    num_pages = bn_manif_data.num_of_pages_300_a in [mak_manif_data.num_of_pages_300_a,
-                                                                     mak_manif_data.num_of_pages_300_a - 1,
-                                                                     mak_manif_data.num_of_pages_300_a + 1]
-                    b_form = mak_manif_data.b_format + 0.125 * mak_manif_data.b_format >= bn_manif_data.b_format >= \
-                             mak_manif_data.b_format - 0.125 * mak_manif_data.b_format
-                    edition = bn_manif_data.edition == mak_manif_data.edition
+            if (bn_manif_data.isbn_020_az and mak_manif_data.isbn_020_az and \
+               bn_manif_data.isbn_020_az != mak_manif_data.isbn_020_az and \
+               len(set(bn_manif_data.isbn_020_az) | set(mak_manif_data.isbn_020_az)) <= \
+               len(bn_manif_data.isbn_020_az) and \
+               len(set(bn_manif_data.isbn_020_az) | set(mak_manif_data.isbn_020_az)) <= \
+               len(mak_manif_data.isbn_020_az)) or (not bn_manif_data.isbn_020_az or not \
+               mak_manif_data.isbn_020_az):
+                print('ISBN case 1')
+                last_5_char_245 = bn_manif_data.title_245[-5:] == mak_manif_data.title_245[-5:]
+                num_245 = bn_manif_data.numbers_from_title_245 == mak_manif_data.numbers_from_title_245
+                place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
+                num_pages = bn_manif_data.num_of_pages_300_a in [mak_manif_data.num_of_pages_300_a,
+                                                                 mak_manif_data.num_of_pages_300_a - 1,
+                                                                 mak_manif_data.num_of_pages_300_a + 1]
+                b_form = mak_manif_data.b_format + 0.125 * mak_manif_data.b_format >= bn_manif_data.b_format >= \
+                         mak_manif_data.b_format - 0.125 * mak_manif_data.b_format
+                edition = bn_manif_data.edition == mak_manif_data.edition
 
-                    if last_5_char_245 and num_245 and place_pub_260 and num_pages and b_form and edition:
-                        matched_from_245_with_edition.add(candidate)
-                        print('There is a match - no editions or editions are the same.')
-                    if last_5_char_245 and num_245 and place_pub_260 and num_pages and b_form and not edition:
-                        matched_from_245_without_edition.add(candidate)
-                        print('There is a match, but editions are different.')
+                if last_5_char_245 and num_245 and place_pub_260 and num_pages and b_form and edition:
+                    matched_from_245_with_edition.add(candidate)
+                    print('There is a match - no editions or editions are the same.')
+                if last_5_char_245 and num_245 and place_pub_260 and num_pages and b_form and not edition:
+                    matched_from_245_without_edition.add(candidate)
+                    print('There is a match, but editions are different.')
 
-                if bn_manif_data.isbn_020_az and mak_manif_data.isbn_020_az and \
-                   bn_manif_data.isbn_020_az == mak_manif_data.isbn_020_az:
-                    print('ISBN case 2')
-                    last_5_char_245 = bn_manif_data.title_245[-5:] == mak_manif_data.title_245[-5:]
-                    num_245 = bn_manif_data.numbers_from_title_245 == mak_manif_data.numbers_from_title_245
-                    place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
-                    num_pages = bn_manif_data.num_of_pages_300_a in [mak_manif_data.num_of_pages_300_a,
-                                                                     mak_manif_data.num_of_pages_300_a - 1,
-                                                                     mak_manif_data.num_of_pages_300_a + 1]
-                    b_form = mak_manif_data.b_format + 0.125 * mak_manif_data.b_format >= bn_manif_data.b_format >= \
-                             mak_manif_data.b_format - 0.125 * mak_manif_data.b_format
-                    edition = bn_manif_data.edition == mak_manif_data.edition
+            if bn_manif_data.isbn_020_az and mak_manif_data.isbn_020_az and \
+               bn_manif_data.isbn_020_az == mak_manif_data.isbn_020_az:
+                print('ISBN case 2')
+                last_5_char_245 = bn_manif_data.title_245[-5:] == mak_manif_data.title_245[-5:]
+                num_245 = bn_manif_data.numbers_from_title_245 == mak_manif_data.numbers_from_title_245
+                place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
+                num_pages = bn_manif_data.num_of_pages_300_a in [mak_manif_data.num_of_pages_300_a,
+                                                                 mak_manif_data.num_of_pages_300_a - 1,
+                                                                 mak_manif_data.num_of_pages_300_a + 1]
+                b_form = mak_manif_data.b_format + 0.125 * mak_manif_data.b_format >= bn_manif_data.b_format >= \
+                         mak_manif_data.b_format - 0.125 * mak_manif_data.b_format
+                edition = bn_manif_data.edition == mak_manif_data.edition
 
-                    if (num_245 and place_pub_260 and num_pages and b_form and edition and not last_5_char_245) or \
-                       (last_5_char_245 and place_pub_260 and num_pages and b_form and edition and not num_245) or \
-                       (last_5_char_245 and num_245 and num_pages and b_form and edition and not place_pub_260) or \
-                       (num_245 and place_pub_260 and num_pages and b_form and edition and last_5_char_245):
-                        matched_from_245_with_edition.add(candidate)
-                        print('There is a match - no editions or editions are the same.')
+                if (num_245 and place_pub_260 and num_pages and b_form and edition and not last_5_char_245) or \
+                   (last_5_char_245 and place_pub_260 and num_pages and b_form and edition and not num_245) or \
+                   (last_5_char_245 and num_245 and num_pages and b_form and edition and not place_pub_260) or \
+                   (num_245 and place_pub_260 and num_pages and b_form and edition and last_5_char_245):
+                    matched_from_245_with_edition.add(candidate)
+                    print('There is a match - no editions or editions are the same.')
 
-                    if last_5_char_245 and place_pub_260 and num_pages and b_form and num_245 and not edition:
-                        matched_from_245_without_edition.add(candidate)
-                        print('There is a match, but editions are different.')
+                if last_5_char_245 and place_pub_260 and num_pages and b_form and num_245 and not edition:
+                    matched_from_245_without_edition.add(candidate)
+                    print('There is a match, but editions are different.')
 
     if matched_from_245_with_edition:
         return list(matched_from_245_with_edition)[0]
