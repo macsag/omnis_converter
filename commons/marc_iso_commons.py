@@ -36,9 +36,11 @@ def get_values_by_field_and_subfield(marc21_record, field_and_subfields):
 
 
 def truncate_title_proper(value):
-    if value[-2:] in [' /', ' :', ' =']:
+    if value[-3:] in ['  /', '  :', '  =', '  .']:
+        return value[:-3]
+    if value[-2:] in [' /', ' :', ' =', ' .']:
         return value[:-2]
-    if value[-1:] in [',']:
+    if value[-1:] in [',', '/', ':', '=', '.']:
         return value[:-1]
     else:
         return value
@@ -50,11 +52,26 @@ def truncate_title_from_246(value):
     if value[-2:] in [', ']:
         return value[:-2]
 
-    match = re.search(',\s*\d+', value)  # supposedly there is no need to compile pattern, python caches it by default
+    match = re.search(r',\s*\d+', value)  # supposedly there is no need to compile pattern, python caches it by default
     if match:
         return value.replace(match.group(0), '')
     else:
         return value
+
+
+def normalize_title_for_frbr_indexing(title: str):
+    match = re.finditer(r'\W', title)
+    for m_object in match:
+        title = title.replace(m_object.group(0), ' ')
+    title = title.replace('   ', ' ').replace('  ', ' ')
+    title = title.upper()
+    match = re.search(r'^\W+', title)
+    if match:
+        title = title[match.span(0)[1]:]
+    match = re.search(r'\W+$', title)
+    if match:
+        title = title[:match.span(0)[0]]
+    return title
 
 
 def to_single_value(list_of_values):
@@ -125,19 +142,6 @@ def create_jsonlines_like_dict(list_of_values, marc_object, marc_tag):
             return processed_list_of_values
     else:
         return list_of_values
-
-
-class ObjCounter(object):
-    __slots__ = 'count'
-
-    def __init__(self):
-        self.count = 0
-
-    def __repr__(self):
-        return f'ObjCounter(title_count={self.count}'
-
-    def add(self, number_to_add):
-        self.count += number_to_add
 
 
 def serialize_to_jsonl_descr(subfields_zero_list):
