@@ -2,20 +2,22 @@ from uuid import uuid4
 import json
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary
-from commons.marc_iso_commons import is_dbn, truncate_title_from_246, ObjCounter
-from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, serialize_to_list_of_values, normalize_publisher
+from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary, normalize_title_for_frbr_indexing
+from commons.marc_iso_commons import is_dbn, truncate_title_from_246, serialize_to_list_of_values
+from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, normalize_publisher
 from commons.json_writer import write_to_json
 
-from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields
+from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields, No008FieldFound
 
-from descriptor_resolver.resolve_record import resolve_field_value, only_values, resolve_code, resolve_code_and_serialize
+from descriptor_resolver.resolve_record import resolve_field_value, only_values
+from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_serialize
 
 from objects.expression import Expression
+from objects.helper_objects import ObjCounter
 
 
 class Work(object):
-    __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'titles240', 'titles245',
+    __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'titles240', 'titles245', 'titles245p',
                  'titles246_title_orig', 'titles246_title_other', 'language_codes', 'language_of_orig_codes',
                  'language_orig', 'language_orig_obj', 'pub_country_codes', 'expressions_dict',
                  'manifestations_bn_ids', 'manifestations_mak_ids', 'libraries', 'search_adress', 'search_authors',
@@ -42,6 +44,7 @@ class Work(object):
 
         self.titles240 = set()
         self.titles245 = {}
+        self.titles245p = set()
         self.titles246_title_orig = {}
         self.titles246_title_other = {}
 
@@ -223,7 +226,7 @@ class Work(object):
                             if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
                                 list_val_711abcdn.add(
                                     ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                        if not e_subflds and not subflds_4:
+                        if not j_subflds and not subflds_4:
                             list_val_711abcdn.add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
@@ -283,32 +286,53 @@ class Work(object):
             # only_values_from_list_711 = only_values(resolved_list_711)
 
             self.other_creator.update(resolved_list_711)
-        else:
-            pass
 
     # 3.1.3
     def get_titles(self, bib_object):
-        # get title from 245 field
+        # get 245 field
         title_245_raw = bib_object.get_fields('245')
-        if title_245_raw:
-            title_245_raw = title_245_raw[0]
+        field_008_raw = bib_object.get_fields('008')
+
+        # validate record
+        if len(title_245_raw) > 1 or not title_245_raw:
+            raise No245FieldFoundOrTooMany245Fields
+        if not field_008_raw:
+            raise No008FieldFound
+
+        lang_008 = field_008_raw[0].value()[35:38]
 
         list_val_245ab = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
                                                                                              ('245', ['a', 'b'])))
-        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
+        title_245_raw_ind = title_245_raw[0].indicators
+        list_val_245a = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
+                                                                                            ('245', ['a'])))
+        val_245a_last_char = get_values_by_field_and_subfield(bib_object, ('245', ['a']))[0][-1]
+        list_val_245p = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object, ('245', ['p'])))
 
-        # validate record
-        if len(list_val_245ab) > 1 or not list_val_245ab:
-            raise No245FieldFoundOrTooMany245Fields
+        if val_245a_last_char == '=' and not list_val_245p:
+            to_add = list_val_245a[0]
 
-        # append title
-        else:
             try:
-                self.titles245.setdefault(lang_008, {}).setdefault(list_val_245ab[0][int(title_245_raw.indicators[1]):],
+                self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
                                                                    ObjCounter()).add(1)
             except ValueError as err:
                 print(err)
-                self.titles245.setdefault(lang_008, {}).setdefault(list_val_245ab[0],
+                self.titles245.setdefault(lang_008, {}).setdefault(to_add,
+                                                                   ObjCounter()).add(1)
+        if list_val_245p:
+            to_add = list_val_245p[0]
+
+            self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
+                                                               ObjCounter()).add(1)
+        else:
+            to_add = list_val_245ab[0]
+
+            try:
+                self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
+                                                                   ObjCounter()).add(1)
+            except ValueError as err:
+                print(err)
+                self.titles245.setdefault(lang_008, {}).setdefault(to_add,
                                                                    ObjCounter()).add(1)
 
         # get titles from 246 fields
@@ -346,10 +370,10 @@ class Work(object):
             list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
 
             try:
-                self.titles240.update(list_val_240[0][int(title_240_raw.indicators[1]):])
+                self.titles240.add(list_val_240[0][int(title_240_raw.indicators[1]):])
             except ValueError as err:
                 print(err)
-                self.titles240.update(list_val_240[0])
+                self.titles240.add(list_val_240[0])
 
     def calculate_title_pref(self):
         polish_titles = self.titles245.get('pol')
@@ -409,10 +433,10 @@ class Work(object):
                                                              {}).setdefault(title,
                                                                             ObjCounter()).add(title_count.count)
 
-        matched_work.titles240.update(self.titles240)
-
         for title, title_count in self.titles246_title_other.items():
             matched_work.titles246_title_other.setdefault(title, ObjCounter()).add(title_count.count)
+
+        matched_work.titles240.update(self.titles240)
 
     def merge_manif_bn_ids(self, matched_work):
         matched_work.manifestations_bn_ids.update(self.manifestations_bn_ids)
@@ -426,36 +450,40 @@ class Work(object):
         for title_dict in self.titles245.values():
             for title in title_dict.keys():
                 # no such title - append empty list
-                if title not in works_by_titles:
+                normalized_title = normalize_title_for_frbr_indexing(title)
+                if normalized_title not in works_by_titles:
                     candidate_works_by_245_title.setdefault(title, [])
                 # title found - append candidate uuids
                 else:
-                    candidate_works_by_245_title.setdefault(title, []).extend(works_by_titles.get(title))
+                    candidate_works_by_245_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
 
         for title_dict in self.titles246_title_orig.values():
             for title in title_dict.keys():
                 # no such title - append empty list
-                if title not in works_by_titles:
+                normalized_title = normalize_title_for_frbr_indexing(title)
+                if normalized_title not in works_by_titles:
                     candidate_works_by_246_title_orig.setdefault(title, [])
                 # title found - append candidate uuids
                 else:
-                    candidate_works_by_246_title_orig.setdefault(title, []).extend(works_by_titles.get(title))
+                    candidate_works_by_246_title_orig.setdefault(title, []).extend(works_by_titles.get(normalized_title))
 
         for title in self.titles246_title_other.keys():
             # no such title - append empty list
-            if title not in works_by_titles:
+            normalized_title = normalize_title_for_frbr_indexing(title)
+            if normalized_title not in works_by_titles:
                 candidate_works_by_246_title_other.setdefault(title, [])
             # title found - append candidate uuids
             else:
-                candidate_works_by_246_title_other.setdefault(title, []).extend(works_by_titles.get(title))
+                candidate_works_by_246_title_other.setdefault(title, []).extend(works_by_titles.get(normalized_title))
 
         for title in list(self.titles240):
             # no such title - append empty list
-            if title not in works_by_titles:
+            normalized_title = normalize_title_for_frbr_indexing(title)
+            if normalized_title not in works_by_titles:
                 candidate_works_by_240_title.setdefault(title, [])
             # title found - append candidate uuids
             else:
-                candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(title))
+                candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
 
         matched_uuids = set()
 
@@ -469,7 +497,8 @@ class Work(object):
                     if candidate_work.other_creator:
                         if candidate_work.other_creator == self.other_creator:
                             matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
+                    if not candidate_work.main_creator and not candidate_work.other_creator \
+                            and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
 
         if candidate_works_by_246_title_orig:
@@ -482,7 +511,8 @@ class Work(object):
                     if candidate_work.other_creator:
                         if candidate_work.other_creator == self.other_creator:
                             matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
+                    if not candidate_work.main_creator and not candidate_work.other_creator \
+                            and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
 
         if candidate_works_by_240_title:
@@ -495,7 +525,8 @@ class Work(object):
                     if candidate_work.other_creator:
                         if candidate_work.other_creator == self.other_creator:
                             matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
+                    if not candidate_work.main_creator and not candidate_work.other_creator \
+                            and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
 
         if candidate_works_by_246_title_other:
@@ -508,7 +539,8 @@ class Work(object):
                     if candidate_work.other_creator:
                         if candidate_work.other_creator == self.other_creator:
                             matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator and not self.main_creator and not self.other_creator:
+                    if not candidate_work.main_creator and not candidate_work.other_creator \
+                            and not self.main_creator and not self.other_creator:
                         matched_uuids.add(uuid)
 
         matched_uuids = list(matched_uuids)
@@ -518,17 +550,17 @@ class Work(object):
             # index new work by titles and by uuid
             for title_dict in self.titles245.values():
                 for title in title_dict.keys():
-                    works_by_titles.setdefault(title, set()).add(self.uuid)
+                    works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
             for title_dict in self.titles246_title_orig.values():
                 for title in title_dict.keys():
-                    works_by_titles.setdefault(title, set()).add(self.uuid)
+                    works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
             for title in self.titles240:
-                works_by_titles.setdefault(title, set()).add(self.uuid)
+                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
             for title in self.titles246_title_other.keys():
-                works_by_titles.setdefault(title, set()).add(self.uuid)
+                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
 
             works_by_uuid.setdefault(self.uuid, self)
-            print('Added new work.')
+            #print('Added new work.')
 
         # one candidate found - merge with existing work and index by all titles
         if len(matched_uuids) == 1:
@@ -536,24 +568,165 @@ class Work(object):
             self.merge_titles(matched_work)
             self.merge_manif_bn_ids(matched_work)
             self.index_matched_work_by_titles(matched_work, works_by_titles)
-            print('One candidate found - merged works.')
+            #print('One candidate found - merged works.')
 
         # more than one candidate found
         if len(matched_uuids) > 1:
-            print(f'{len(matched_uuids)} candidates found.')
+            matched_work = works_by_uuid.get(matched_uuids[0])
+            self.merge_titles(matched_work)
+            self.merge_manif_bn_ids(matched_work)
+            self.index_matched_work_by_titles(matched_work, works_by_titles)
+            print(f'{len(matched_uuids)} candidates found, merged with first one.')
+
+    def try_to_merge_possible_duplicates_using_broader_context(self, works_by_uuid, works_by_titles):
+        candidate_works_by_245_title = {}
+        candidate_works_by_246_title_orig = {}
+        candidate_works_by_246_title_other = {}
+        candidate_works_by_240_title = {}
+
+        for title_dict in self.titles245.values():
+            for title in title_dict.keys():
+                # no such title - append empty list
+                normalized_title = normalize_title_for_frbr_indexing(title)
+                if normalized_title not in works_by_titles:
+                    candidate_works_by_245_title.setdefault(title, [])
+                # title found - append candidate uuids
+                else:
+                    candidate_works_by_245_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
+
+        for title_dict in self.titles246_title_orig.values():
+            for title in title_dict.keys():
+                normalized_title = normalize_title_for_frbr_indexing(title)
+                # no such title - append empty list
+                if normalized_title not in works_by_titles:
+                    candidate_works_by_246_title_orig.setdefault(title, [])
+                # title found - append candidate uuids
+                else:
+                    candidate_works_by_246_title_orig.setdefault(title, []).extend(works_by_titles.get(normalized_title))
+
+        for title in self.titles246_title_other.keys():
+            # no such title - append empty list
+            normalized_title = normalize_title_for_frbr_indexing(title)
+            if normalized_title not in works_by_titles:
+                candidate_works_by_246_title_other.setdefault(title, [])
+            # title found - append candidate uuids
+            else:
+                candidate_works_by_246_title_other.setdefault(title, []).extend(works_by_titles.get(normalized_title))
+
+        for title in list(self.titles240):
+            # no such title - append empty list
+            normalized_title = normalize_title_for_frbr_indexing(title)
+            if normalized_title not in works_by_titles:
+                candidate_works_by_240_title.setdefault(title, [])
+            # title found - append candidate uuids
+            else:
+                candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
+
+        matched_uuids = set()
+
+        if candidate_works_by_245_title:
+            for title, uuids_list in candidate_works_by_245_title.items():
+                for uuid in uuids_list:
+                    if uuid != self.uuid:
+                        candidate_work = works_by_uuid.get(uuid)
+                        if candidate_work:
+                            if candidate_work.main_creator:
+                                if candidate_work.main_creator == self.main_creator:
+                                    matched_uuids.add(uuid)
+                            if candidate_work.other_creator:
+                                if candidate_work.other_creator == self.other_creator:
+                                    matched_uuids.add(uuid)
+                            if not candidate_work.main_creator and not candidate_work.other_creator \
+                                    and not self.main_creator and not self.other_creator:
+                                matched_uuids.add(uuid)
+
+        if candidate_works_by_246_title_orig:
+            for title, uuids_list in candidate_works_by_246_title_orig.items():
+                for uuid in uuids_list:
+                    if uuid != self.uuid:
+                        candidate_work = works_by_uuid.get(uuid)
+                        if candidate_work:
+                            if candidate_work.main_creator:
+                                if candidate_work.main_creator == self.main_creator:
+                                    matched_uuids.add(uuid)
+                            if candidate_work.other_creator:
+                                if candidate_work.other_creator == self.other_creator:
+                                    matched_uuids.add(uuid)
+                            if not candidate_work.main_creator and not candidate_work.other_creator \
+                                    and not self.main_creator and not self.other_creator:
+                                matched_uuids.add(uuid)
+
+        if candidate_works_by_240_title:
+            for title, uuids_list in candidate_works_by_240_title.items():
+                for uuid in uuids_list:
+                    if uuid != self.uuid:
+                        candidate_work = works_by_uuid.get(uuid)
+                        if candidate_work:
+                            if candidate_work.main_creator:
+                                if candidate_work.main_creator == self.main_creator:
+                                    matched_uuids.add(uuid)
+                            if candidate_work.other_creator:
+                                if candidate_work.other_creator == self.other_creator:
+                                    matched_uuids.add(uuid)
+                            if not candidate_work.main_creator and not candidate_work.other_creator \
+                                    and not self.main_creator and not self.other_creator:
+                                matched_uuids.add(uuid)
+
+        if candidate_works_by_246_title_other:
+            for title, uuids_list in candidate_works_by_246_title_other.items():
+                for uuid in uuids_list:
+                    if uuid != self.uuid:
+                        candidate_work = works_by_uuid.get(uuid)
+                        if candidate_work:
+                            if candidate_work.main_creator:
+                                if candidate_work.main_creator == self.main_creator:
+                                    matched_uuids.add(uuid)
+                            if candidate_work.other_creator:
+                                if candidate_work.other_creator == self.other_creator:
+                                    matched_uuids.add(uuid)
+                            if not candidate_work.main_creator and not candidate_work.other_creator \
+                                    and not self.main_creator and not self.other_creator:
+                                matched_uuids.add(uuid)
+
+        matched_uuids = list(matched_uuids)
+
+        # one candidate found - merge with existing work and delete duplicate (only in indexed works by uuid)
+        if len(matched_uuids) == 1 and matched_uuids[0] != self.uuid:
+            matched_work = works_by_uuid.get(matched_uuids[0])
+            if matched_work:
+                print(
+                    f'{self.titles245} | {self.titles246_title_orig} | {self.titles246_title_other} | {self.titles240}')
+                print(f'{self.main_creator} | {self.other_creator}')
+                print(
+                    f'{matched_work.titles245} | {matched_work.titles246_title_orig} | {matched_work.titles246_title_other} | {matched_work.titles240}')
+                print(f'{matched_work.main_creator} | {matched_work.other_creator}')
+                self.merge_titles(matched_work)
+                self.merge_manif_bn_ids(matched_work)
+                print('Merged works using broader context!')
+
+                return True
+
+        # more than one candidate found
+        if len(matched_uuids) > 1:
+            print(f'{len(matched_uuids)} candidates found using broader context.')
+
+            return False
+
+        # no candidates found - there is no duplicate
+        return False
 
     @staticmethod
     def index_matched_work_by_titles(matched_work, works_by_titles):
         for title_dict in matched_work.titles245.values():
             for title in title_dict.keys():
-                works_by_titles.setdefault(title, set()).add(matched_work.uuid)
+                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
         for title_dict in matched_work.titles246_title_orig.values():
             for title in title_dict.keys():
-                works_by_titles.setdefault(title, set()).add(matched_work.uuid)
+                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
         for title in matched_work.titles240:
-            works_by_titles.setdefault(title, set()).add(matched_work.uuid)
+            works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
         for title in matched_work.titles246_title_other.keys():
-            works_by_titles.setdefault(title, set()).add(matched_work.uuid)
+            works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
 
     def get_pub_country(self, bib_object):
         pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
@@ -932,8 +1105,8 @@ class Work(object):
                                       'work_title': expr.expr_title,
                                       'work_work':
                                           {'id': int(self.mock_es_id),
-                                          'type': 'work',
-                                          'value': str(self.mock_es_id)}}}
+                                           'type': 'work',
+                                           'value': str(self.mock_es_id)}}}
 
                 json_work_data = json.dumps(dict_work_data, ensure_ascii=False)
                 dict_work_data_list.append(json_work_data)
