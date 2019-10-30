@@ -1,4 +1,4 @@
-from commons.marc_iso_commons import ObjCounter
+from objects.helper_objects import ObjCounter
 
 
 class JsonBufferOut(object):
