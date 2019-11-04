@@ -82,6 +82,7 @@ class Manifestation(object):
         self.work_creator = []
         self.work_creators = []
         self.get_work_creators(work)
+        self.get_mat_contributors(bib_object, code_val_index, descr_index)
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
@@ -89,6 +90,29 @@ class Manifestation(object):
 
     def __repr__(self):
         return f'Manifestation(id={self.mock_es_id}, title_and_resp={self.mat_title_and_resp}'
+
+    def get_mat_contributors(self, bib_object, code_val_index, descr_index):
+        dict_val_700abcd = {}
+        list_val_710abcdn = set()
+        list_val_711abcdn = set()
+
+        list_700_fields = bib_object.get_fields('700')
+        if list_700_fields:
+            for field in list_700_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    for e_sub in e_subflds:
+                        e_sub_code_resolved = code_val_index['contribution_dict'].get(e_sub)
+                        if e_sub_code_resolved:
+                            dict_val_700abcd.setdefault(e_sub_code_resolved.get('name'), set()).add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+
+        resolved_dict_700 = {}
+        for e_sub_value, set_700 in dict_val_700abcd.items():
+            resolved_dict_700.setdefault(e_sub_value, []).extend(
+                serialize_to_jsonl_descr(resolve_field_value(list(set_700), descr_index)))
+        if resolved_dict_700:
+            self.mat_contributor.append(resolved_dict_700)
 
     def get_work_creators(self, work):
         if work.main_creator:
@@ -123,7 +147,7 @@ class Manifestation(object):
 
     def get_publishers_all(self, bib_object):
         pl = get_values_by_field_and_subfield(bib_object, ('260', ['b']))
-        publishers_list = postprocess(normalize_publisher, get_values_by_field_and_subfield(bib_object, ('260', ['b'])))
+        publishers_list = postprocess(normalize_publisher, pl)
 
         self.mat_publisher = publishers_list
 
