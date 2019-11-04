@@ -47,6 +47,7 @@ def code_value_indexer(file_in):
         content_type_dict.setdefault(elem[0], {'name': elem[1], 'id': num})
     for num, elem in enumerate(contribution_list, start=1):
         contribution_dict.setdefault(elem[0], {'name': elem[1], 'id': num})
+        contribution_dict.setdefault(elem[1], {'name': elem[1], 'id': num})
     for num, elem in enumerate(country_list, start=1):
         country_dict.setdefault(elem[0], {'name': elem[1], 'id': num})
     for num, elem in enumerate(media_type_list, start=1):
