@@ -10,10 +10,12 @@ from exceptions.exceptions import DescriptorNotResolved
 from commons.marc_iso_commons import read_marc_from_file, get_values_by_field_and_subfield, get_values_by_field
 from commons.json_writer import JsonBufferOut
 
-from manifestation_matcher.manif_matcher import get_titles_for_manifestation_matching, match_manifestation
-from institutions_indexer.inst_indexer import create_lib_indexes
-from code_value_indexer.code_value_indexer import code_value_indexer
 from indexers.descriptors_indexer import index_descriptors
+from indexers.code_value_indexer import code_value_indexer
+from indexers.inst_indexer import create_lib_indexes
+
+from manifestation_matcher.manif_matcher import get_titles_for_manifestation_matching, match_manifestation
+
 from descriptor_resolver.resolve_record import resolve_record
 
 from objects.work import Work
@@ -291,16 +293,9 @@ if __name__ == '__main__':
                'code_val_file_in': '../code_value_indexer/code_value_sql_source/001_import.sql',
                'descr_files_path_dir': '../source_files/descriptors',
                'buffer': buff,
-               'run_manif_matcher': True,
+               'run_manif_matcher': False,
                'frbr_step_two': True,
-               'limit': 50000}
+               'limit': 10000}
 
     main_loop(**configs)
     buff.flush()
-
-
-
-
-
-
-
