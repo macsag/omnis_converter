@@ -23,3 +23,13 @@ def create_lib_indexes(file_in):
     for rcd in read_json_file(file_in):
         index_libraries(rcd, lib_ind_mak, lib_in_es)
     return lib_ind_mak, lib_in_es
+
+
+if __name__ == '__main__':
+
+    lib_mak, lib_es = create_lib_indexes('../input_files/institutions/manager-library.json')
+    for id, lib in lib_mak.items():
+        lib_ser = lib.get_serialized()
+        with open('libs.csv', 'a', encoding='utf-8') as fp:
+            fp.write(''.join([f'{x}|' for x in lib_ser.values()]))
+            fp.write('\n')

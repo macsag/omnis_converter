@@ -5,6 +5,7 @@ from commons.marc_iso_commons import get_values_by_field_and_subfield, get_value
 from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary, normalize_title_for_frbr_indexing
 from commons.marc_iso_commons import is_dbn, truncate_title_from_246, serialize_to_list_of_values
 from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, normalize_publisher
+from commons.marc_iso_commons import select_number_of_creators
 from commons.json_writer import write_to_json
 
 from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields, No008FieldFound
@@ -17,16 +18,17 @@ from objects.helper_objects import ObjCounter
 
 
 class Work(object):
-    __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'main_creator_real', 'titles240', 'titles245',
-                 'titles245p',
-                 'titles246_title_orig', 'titles246_title_other', 'language_codes', 'language_of_orig_codes',
+    __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'main_creator_real',
+                 'titles240', 'titles245', 'titles245p', 'titles246_title_orig',
+                 'titles246_title_other', 'language_codes', 'language_of_orig_codes',
                  'language_orig', 'language_orig_obj', 'pub_country_codes', 'expressions_dict',
                  'manifestations_bn_ids', 'manifestations_mak_ids', 'libraries', 'search_adress', 'search_authors',
                  'search_identity', 'search_title', 'search_subject', 'search_formal', 'search_form', 'search_note',
                  'filter_creator', 'filter_cultural_group', 'filter_form', 'filter_lang', 'filter_lang_orig',
                  'filter_nat_bib_code', 'filter_nat_bib_year', 'filter_pub_country', 'filter_pub_date',
                  'filter_publisher', 'filter_publisher_uniform', 'filter_subject', 'filter_subject_place',
-                 'filter_subject_time', 'filter_time_created', 'work_presentation_main_creator', 'sort_author',
+                 'filter_subject_time', 'filter_time_created', 'work_presentation_main_creator',
+                 'work_presentation_another_creator', 'sort_author', 'work_other_creator',
                  'work_title_pref', 'work_title_of_orig_pref', 'work_title_alt', 'work_title_of_orig_alt',
                  'work_title_index', 'work_main_creator', 'work_other_creator_index', 'work_udc', 'work_time_created',
                  'work_form', 'work_genre', 'work_cultural_group', 'work_subject_person', 'work_subject_corporate_body',
@@ -34,7 +36,8 @@ class Work(object):
                  'work_subject_work', 'popularity_join', 'modificationTime', 'stat_digital', 'work_publisher_work',
                  'metadata_source', 'work_main_creator_index', 'stat_item_count', 'stat_digital_library_count',
                  'stat_library_count', 'stat_materialization_count', 'stat_public_domain', 'expression_ids',
-                 'materialization_ids', 'item_ids', 'suggest', 'phrase_suggest']
+                 'materialization_ids', 'item_ids', 'suggest', 'phrase_suggest',
+                 'title_with_nonf_chars']
 
     def __init__(self):
         self.uuid = uuid4()
@@ -52,6 +55,9 @@ class Work(object):
         self.titles245p = set()
         self.titles246_title_orig = {}
         self.titles246_title_other = {}
+
+        # helper dict of creators for control of nonfiling characters
+        self.title_with_nonf_chars = {}
 
         self.language_codes = set()
         self.language_of_orig_codes = {}
@@ -96,6 +102,7 @@ class Work(object):
 
         # presentation data
         self.work_presentation_main_creator = []
+        self.work_presentation_another_creator = []
 
         # sort data
         self.sort_author = []
@@ -108,6 +115,7 @@ class Work(object):
         self.work_title_index = []
 
         self.work_main_creator = []
+        self.work_other_creator = []
         self.work_other_creator_index = []
 
         self.work_udc = set()
@@ -312,6 +320,7 @@ class Work(object):
         if not field_008_raw:
             raise No008FieldFound
 
+        # get titles from 245 field
         lang_008 = field_008_raw[0].value()[35:38]
 
         list_val_245ab = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
@@ -326,27 +335,47 @@ class Work(object):
             to_add = list_val_245a[0]
 
             try:
-                self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
-                                                                   ObjCounter()).add(1)
+                self.titles245.setdefault(lang_008,
+                                          {}).setdefault(to_add[int(title_245_raw_ind[1]):],
+                                                         ObjCounter()).add(1)
+
+                self.title_with_nonf_chars.setdefault(to_add[int(title_245_raw_ind[1]):],
+                                                      set()).add(to_add)
             except ValueError as err:
-                print(err)
-                self.titles245.setdefault(lang_008, {}).setdefault(to_add,
-                                                                   ObjCounter()).add(1)
+                #print(err)
+                self.titles245.setdefault(lang_008,
+                                          {}).setdefault(to_add,
+                                                         ObjCounter()).add(1)
+
+                self.title_with_nonf_chars.setdefault(to_add,
+                                                      set()).add(to_add)
         if list_val_245p:
             to_add = list_val_245p[0]
 
-            self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
-                                                               ObjCounter()).add(1)
+            self.titles245.setdefault(lang_008,
+                                      {}).setdefault(to_add,
+                                                     ObjCounter()).add(1)
+
+            self.title_with_nonf_chars.setdefault(to_add,
+                                                  set()).add(to_add)
+
         else:
             to_add = list_val_245ab[0]
 
             try:
                 self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
                                                                    ObjCounter()).add(1)
+
+                self.title_with_nonf_chars.setdefault(to_add[int(title_245_raw_ind[1]):],
+                                                      set()).add(to_add)
+
             except ValueError as err:
-                print(err)
+                #print(err)
                 self.titles245.setdefault(lang_008, {}).setdefault(to_add,
                                                                    ObjCounter()).add(1)
+
+                self.title_with_nonf_chars.setdefault(to_add,
+                                                      set()).add(to_add)
 
         # get titles from 246 fields
         list_fields_246 = bib_object.get_fields('246')
@@ -376,62 +405,21 @@ class Work(object):
             self.titles246_title_other.setdefault(val, ObjCounter()).add(1)
 
         # get title from 240 field
-        title_240_raw = bib_object.get_fields('240')
-        if title_240_raw:
-            title_240_raw = title_240_raw[0]
+        title_240_raw_list = bib_object.get_fields('240')
+        if title_240_raw_list:
+            title_240_raw = title_240_raw_list[0]
 
             list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
 
             try:
                 self.titles240.add(list_val_240[0][int(title_240_raw.indicators[1]):])
+
+                self.title_with_nonf_chars.setdefault(list_val_240[0][int(title_240_raw.indicators[1]):],
+                                                      set()).add(list_val_240[0])
             except ValueError as err:
-                print(err)
+                #print(err)
                 self.titles240.add(list_val_240[0])
-
-    def calculate_title_pref(self):
-        polish_titles = self.titles245.get('pol')
-        if polish_titles:
-            polish_titles_sorted_by_frequency = sorted(polish_titles.items(), key=lambda x: x[1].count)
-            self.work_title_pref = polish_titles_sorted_by_frequency[0][0]
-        else:
-            self.work_title_pref = self.work_title_of_orig_pref
-
-    def calculate_title_of_orig_pref(self):
-        orig_titles = self.titles246_title_orig
-        if orig_titles:
-            orig_titles_flattened = []
-            for title_dict in orig_titles.values():
-                for title, count in title_dict.items():
-                    orig_titles_flattened.append((title, count))
-            orig_titles_sorted_by_frequency = sorted(orig_titles_flattened, key=lambda x: x[1].count)
-            self.work_title_of_orig_pref = orig_titles_sorted_by_frequency[0][0]
-        else:
-            orig_titles_from_245 = self.titles245.get(self.language_orig)
-            if orig_titles_from_245:
-                orig_titles_from_245_sorted_by_frequency = sorted(orig_titles_from_245.items(),
-                                                                  key=lambda x: x[1].count)
-                self.work_title_of_orig_pref = orig_titles_from_245_sorted_by_frequency[0][0]
-            else:
-                pass
-
-    def get_language_of_original(self, bib_object):
-        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
-        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
-
-        if lang_008 and not lang_041_h:
-            self.language_of_orig_codes.setdefault(lang_008, ObjCounter()).add(1)
-        if len(lang_041_h) == 1:
-            self.language_of_orig_codes.setdefault(lang_041_h[0], ObjCounter()).add(1)
-
-    def get_languages(self, bib_object):
-        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
-        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
-
-        self.language_codes.update([lang_008])
-        self.language_codes.update(lang_041_h)
-
-    def calculate_lang_orig(self):
-        self.language_orig = sorted(self.language_of_orig_codes.items(), key=lambda x: x[1].count)[0][0]
+                self.title_with_nonf_chars.setdefault(list_val_240[0], set()).add(list_val_240[0])
 
     def merge_titles(self, matched_work):
 
@@ -450,6 +438,75 @@ class Work(object):
             matched_work.titles246_title_other.setdefault(title, ObjCounter()).add(title_count.count)
 
         matched_work.titles240.update(self.titles240)
+
+        for title, title_full in self.title_with_nonf_chars.items():
+            matched_work.title_with_nonf_chars.setdefault(title, set()).update(title_full)
+
+    def get_titles_of_orig_alt(self):
+        for title_dict in self.titles246_title_orig.values():
+            for title in title_dict.keys():
+                if title != self.work_title_of_orig_pref:
+                    self.work_title_of_orig_alt.add(title)
+
+    def get_titles_alt(self):
+        for title in self.titles246_title_other.keys():
+            if title != self.work_title_of_orig_pref and title != self.work_title_pref:
+                self.work_title_alt.add(title)
+        for title_dict in self.titles245.values():
+            for title in title_dict.keys():
+                if title != self.work_title_of_orig_pref and title != self.work_title_pref:
+                    self.work_title_alt.add(list(self.title_with_nonf_chars.get(title))[0])
+
+    def calculate_title_pref(self):
+        polish_titles = self.titles245.get('pol')
+        if polish_titles:
+            polish_titles_sorted_by_frequency = sorted(polish_titles.items(), key=lambda x: x[1].count)
+            self.work_title_pref = list(self.title_with_nonf_chars.get(polish_titles_sorted_by_frequency[0][0]))[0]
+        else:
+            self.work_title_pref = self.work_title_of_orig_pref
+
+    def calculate_title_of_orig_pref(self):
+        orig_titles = self.titles246_title_orig
+        if orig_titles:
+            orig_titles_flattened = []
+            for title_dict in orig_titles.values():
+                for title, count in title_dict.items():
+                    orig_titles_flattened.append((title, count))
+            orig_titles_sorted_by_frequency = sorted(orig_titles_flattened, key=lambda x: x[1].count)
+            self.work_title_of_orig_pref = orig_titles_sorted_by_frequency[0][0]
+        else:
+            orig_titles_from_245 = self.titles245.get(self.language_orig)
+            if orig_titles_from_245:
+                orig_titles_from_245_sorted_by_frequency = sorted(orig_titles_from_245.items(),
+                                                                  key=lambda x: x[1].count)
+                self.work_title_of_orig_pref = list(self.title_with_nonf_chars.get(orig_titles_from_245_sorted_by_frequency[0][0]))[0]
+            else:
+                for title_dict in self.titles245.values():
+                    for title in title_dict.keys():
+                        self.work_title_of_orig_pref = list(self.title_with_nonf_chars.get(title))[0]
+                        break
+
+    def get_language_of_original(self, bib_object):
+        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
+        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
+
+        if lang_008 and not lang_041_h:
+            self.language_of_orig_codes.setdefault(lang_008, ObjCounter()).add(1)
+        if len(lang_041_h) == 1:
+            self.language_of_orig_codes.setdefault(lang_041_h[0], ObjCounter()).add(1)
+
+    def get_languages(self, bib_object):
+        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
+        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
+
+        self.language_codes.update([lang_008])
+        self.language_codes.update(lang_041_h)
+
+    def calculate_lang_orig(self):
+        try:
+            self.language_orig = sorted(self.language_of_orig_codes.items(), key=lambda x: x[1].count)[0][0]
+        except IndexError:
+            self.language_orig = 'und'
 
     def merge_manif_bn_ids(self, matched_work):
         matched_work.manifestations_bn_ids.update(self.manifestations_bn_ids)
@@ -589,7 +646,7 @@ class Work(object):
             self.merge_titles(matched_work)
             self.merge_manif_bn_ids(matched_work)
             self.index_matched_work_by_titles(matched_work, works_by_titles)
-            print(f'{len(matched_uuids)} candidates found, merged with first one.')
+            #print(f'{len(matched_uuids)} candidates found, merged with first one.')
 
     def try_to_merge_possible_duplicates_using_broader_context(self, works_by_uuid, works_by_titles):
         candidate_works_by_245_title = {}
@@ -707,21 +764,21 @@ class Work(object):
         if len(matched_uuids) == 1 and matched_uuids[0] != self.uuid:
             matched_work = works_by_uuid.get(matched_uuids[0])
             if matched_work:
-                print(
-                    f'{self.titles245} | {self.titles246_title_orig} | {self.titles246_title_other} | {self.titles240}')
-                print(f'{self.main_creator} | {self.other_creator}')
-                print(
-                    f'{matched_work.titles245} | {matched_work.titles246_title_orig} | {matched_work.titles246_title_other} | {matched_work.titles240}')
-                print(f'{matched_work.main_creator} | {matched_work.other_creator}')
+                #print(
+                    #f'{self.titles245} | {self.titles246_title_orig} | {self.titles246_title_other} | {self.titles240}')
+                #print(f'{self.main_creator} | {self.other_creator}')
+                #print(
+                    #f'{matched_work.titles245} | {matched_work.titles246_title_orig} | {matched_work.titles246_title_other} | {matched_work.titles240}')
+                #print(f'{matched_work.main_creator} | {matched_work.other_creator}')
                 self.merge_titles(matched_work)
                 self.merge_manif_bn_ids(matched_work)
-                print('Merged works using broader context!')
+                #print('Merged works using broader context!')
 
                 return True
 
         # more than one candidate found
         if len(matched_uuids) > 1:
-            print(f'{len(matched_uuids)} candidates found using broader context.')
+            #print(f'{len(matched_uuids)} candidates found using broader context.')
 
             return False
 
@@ -756,20 +813,7 @@ class Work(object):
 
         return publishers_list
 
-    def get_titles_of_orig_alt(self):
-        for title_dict in self.titles246_title_orig.values():
-            for title in title_dict.keys():
-                if title != self.work_title_of_orig_pref:
-                    self.work_title_of_orig_alt.add(title)
 
-    def get_titles_alt(self):
-        for title in self.titles246_title_other.keys():
-            if title != self.work_title_of_orig_pref and title != self.work_title_pref:
-                self.work_title_alt.add(title)
-        for title_dict in self.titles245.values():
-            for title in title_dict.keys():
-                if title != self.work_title_of_orig_pref and title != self.work_title_pref:
-                    self.work_title_alt.add(title)
 
     @staticmethod
     def get_creators_from_manif(bib_object, descr_index):
@@ -866,7 +910,6 @@ class Work(object):
                     get_values_by_field_and_subfield(bib_object, ('651', ['a', 'b', 'c', 'd'])), descr_index))
                 self.work_subject_time = []
                 self.work_subject_work = []
-
                 self.work_genre.update(resolve_field_value(
                     get_values_by_field_and_subfield(bib_object, ('655', ['a', 'b', 'c', 'd'])), descr_index))
 
@@ -878,10 +921,23 @@ class Work(object):
             self.work_cultural_group.update(resolve_field_value(
                 get_values_by_field_and_subfield(bib_object, ('386', ['a'])), descr_index))
 
-            self.work_main_creator = serialize_to_jsonl_descr_creator(self.main_creator_real)
+            # get creators and creators for presentation
+            self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
             self.work_main_creator_index = []  # todo
             self.work_other_creator_index = []  # todo
-            self.work_presentation_main_creator = self.work_main_creator[:3]
+
+            if len(list(self.main_creator_real)) > 1:
+                self.work_presentation_main_creator = select_number_of_creators(self.work_main_creator,
+                                                                                cr_num_end=1)
+                self.work_presentation_another_creator = select_number_of_creators(self.work_main_creator,
+                                                                                   cr_num_start=1)
+            else:
+                if self.main_creator_real:
+                    self.work_presentation_main_creator = self.work_main_creator
+                    self.work_presentation_another_creator = []
+                else:
+                    self.work_presentation_main_creator = []
+                    self.work_presentation_another_creator = []
 
             self.work_time_created = []  # todo
             self.work_title_index = []  # todo
@@ -907,7 +963,7 @@ class Work(object):
             self.search_formal.update(*[only_values(res_val_list) for res_val_list in
                                         [self.work_cultural_group, self.work_genre]])
 
-            self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0'))
+            self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0'))
             self.filter_publisher.update(self.get_publishers_all(bib_object))
             self.get_uniform_publishers(bib_object, descr_index)
             self.filter_creator.update(creators_from_manif)
@@ -974,6 +1030,10 @@ class Work(object):
             self.stat_materialization_count = len(self.materialization_ids)
             self.item_ids.extend([int(i_id) for i_id in list(expr.item_ids)])
             self.stat_item_count += expr.item_count
+            self.stat_digital = True if self.stat_digital or expr.stat_digital else False
+            self.stat_public_domain = True if self.stat_public_domain or expr.stat_public_domain else False
+            self.stat_digital_library_count = 1 if self.stat_digital_library_count == 1 or expr.stat_public_domain == 1 \
+                else 0
 
             for lib in expr.libraries:
                 if lib['id'] not in lib_ids:
@@ -1055,9 +1115,11 @@ class Work(object):
                           'work_form': serialize_to_jsonl_descr(list(self.work_form)),
                           'work_genre': serialize_to_jsonl_descr(list(self.work_genre)),
                           'work_main_creator': list(self.work_main_creator),
+                          'work_other_creator': list(self.work_other_creator),
                           'work_main_creator_index': list(self.work_main_creator_index),
                           'work_other_creator_index': list(self.work_other_creator_index),
                           'work_presentation_main_creator': list(self.work_presentation_main_creator),
+                          'work_presentation_another_creator': list(self.work_presentation_another_creator),
                           'work_publisher_work': self.work_publisher_work,
                           'work_subject': serialize_to_jsonl_descr(list(self.work_subject)),
                           'work_subject_corporate_body': serialize_to_jsonl_descr(

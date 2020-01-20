@@ -1,16 +1,16 @@
-from pymarc import MARCReader
+from commons.permissive_marc_reader import PermissiveMARCReader
 import re
 
 
 def read_marc_from_file(file):
     with open(file, 'rb') as fp:
-        rdr = MARCReader(fp, to_unicode=True, force_utf8=True, utf8_handling='ignore')
+        rdr = PermissiveMARCReader(fp, to_unicode=True, force_utf8=True, utf8_handling='ignore')
         for rcd in rdr:
             yield rcd
 
 
 def read_marc_from_binary(data_chunk):
-    marc_rdr = MARCReader(data_chunk, to_unicode=True, force_utf8=True, utf8_handling='ignore')
+    marc_rdr = PermissiveMARCReader(data_chunk, to_unicode=True, force_utf8=True, utf8_handling='ignore')
     for rcd in marc_rdr:
         return rcd
 
@@ -92,12 +92,14 @@ def get_rid_of_punctuation(value):
 
 
 def prepare_name_for_indexing(value):
-    value = ''.join(char.replace('  ', ' ').replace(',', '').replace('.', '') for char in value)
-    if value[0] == ' ':
-        value = value[1:]
-    if value[-1] == ' ':
-        value = value[:-1]
-
+    if value:
+        value = ''.join(char.replace('  ', ' ').replace(',', '').replace('.', '') for char in value)
+        match = re.search(r'^\W+', value)
+        if match:
+            value = value[match.span(0)[1]:]
+        match = re.search(r'\W+$', value)
+        if match:
+            value = value[:match.span(0)[0]]
     return value
 
 
@@ -167,6 +169,25 @@ def serialize_to_jsonl_descr_creator(subfields_zero_list):
         return list_to_return
     else:
         return subfields_zero_list
+
+
+def select_number_of_creators(list_of_dicts_of_creators: list, cr_num_start=None, cr_num_end=None):
+    if list_of_dicts_of_creators:
+        list_to_return = []
+
+        dict_to_update = {'key': 'Autor', 'value': []}
+        cr_list = list_of_dicts_of_creators[0].get('value')
+
+        if not cr_num_start and cr_num_end:
+            cr_list = cr_list[:cr_num_end]
+        if cr_num_start and not cr_num_end:
+            cr_list = cr_list[cr_num_start:]
+        dict_to_update['value'].extend(cr_list)
+        list_to_return.append(dict_to_update)
+
+        return list_to_return
+    else:
+        return list_of_dicts_of_creators
 
 
 def serialize_to_list_of_values(subfields_zero_list):

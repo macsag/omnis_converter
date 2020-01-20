@@ -16,8 +16,11 @@ def resolve_record(marc_record, descr_index):
             raw_objects_flds_list = marc_record.get_fields(fld)
 
             for raw_fld in raw_objects_flds_list:
-                term_to_search = prepare_name_for_indexing(
-                    ' '.join(subfld for subfld in raw_fld.get_subfields(*subflds)))
+                name_for_prepare = ' '.join(subfld for subfld in raw_fld.get_subfields(*subflds))
+                if name_for_prepare:
+                    term_to_search = prepare_name_for_indexing(name_for_prepare)
+                else:
+                    raise DescriptorNotResolved
 
                 if term_to_search in descr_index:
                     descr = descr_index.get(term_to_search)
@@ -27,7 +30,7 @@ def resolve_record(marc_record, descr_index):
                     raw_fld.add_subfield('0', identifier)
                     marc_record.add_ordered_field(raw_fld)
                 else:
-                    print(term_to_search)
+                    #print(term_to_search)
                     raise DescriptorNotResolved
 
     return marc_record
@@ -37,12 +40,13 @@ def resolve_field_value(field_value_list, descr_index):
     if field_value_list:
         list_to_return = []
         for val in field_value_list:
-            term_to_search = prepare_name_for_indexing(val)
+            if val:
+                term_to_search = prepare_name_for_indexing(val)
 
-            if term_to_search in descr_index:
-                descr = descr_index.get(term_to_search)
-                val_with_id = f'{descr[0]}^^{descr[1]}^^{descr[2]}'
-                list_to_return.append(val_with_id)
+                if term_to_search in descr_index:
+                    descr = descr_index.get(term_to_search)
+                    val_with_id = f'{descr[0]}^^{descr[1]}^^{descr[2]}'
+                    list_to_return.append(val_with_id)
 
         return list_to_return
 

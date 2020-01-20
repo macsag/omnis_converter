@@ -77,7 +77,7 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
                len(set(bn_manif_data.isbn_020_az) | set(mak_manif_data.isbn_020_az)) <= \
                len(mak_manif_data.isbn_020_az)) or (not bn_manif_data.isbn_020_az or not \
                mak_manif_data.isbn_020_az):
-                print('ISBN case 1')
+                #print('ISBN case 1')
                 last_5_char_245 = bn_manif_data.title_245[-5:] == mak_manif_data.title_245[-5:]
                 num_245 = bn_manif_data.numbers_from_title_245 == mak_manif_data.numbers_from_title_245
                 place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
@@ -90,14 +90,14 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
 
                 if last_5_char_245 and num_245 and place_pub_260 and num_pages and b_form and edition:
                     matched_from_245_with_edition.add(candidate)
-                    print('There is a match - no editions or editions are the same.')
+                    #print('There is a match - no editions or editions are the same.')
                 if last_5_char_245 and num_245 and place_pub_260 and num_pages and b_form and not edition:
                     matched_from_245_without_edition.add(candidate)
-                    print('There is a match, but editions are different.')
+                    #print('There is a match, but editions are different.')
 
             if bn_manif_data.isbn_020_az and mak_manif_data.isbn_020_az and \
                bn_manif_data.isbn_020_az == mak_manif_data.isbn_020_az:
-                print('ISBN case 2')
+                #print('ISBN case 2')
                 last_5_char_245 = bn_manif_data.title_245[-5:] == mak_manif_data.title_245[-5:]
                 num_245 = bn_manif_data.numbers_from_title_245 == mak_manif_data.numbers_from_title_245
                 place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
@@ -113,11 +113,11 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
                    (last_5_char_245 and num_245 and num_pages and b_form and edition and not place_pub_260) or \
                    (num_245 and place_pub_260 and num_pages and b_form and edition and last_5_char_245):
                     matched_from_245_with_edition.add(candidate)
-                    print('There is a match - no editions or editions are the same.')
+                    #print('There is a match - no editions or editions are the same.')
 
                 if last_5_char_245 and place_pub_260 and num_pages and b_form and num_245 and not edition:
                     matched_from_245_without_edition.add(candidate)
-                    print('There is a match, but editions are different.')
+                    #print('There is a match, but editions are different.')
 
     if matched_from_245_with_edition:
         return list(matched_from_245_with_edition)[0]
@@ -148,7 +148,7 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
                len(set(bn_manif_data.isbn_020_az) | set(mak_manif_data.isbn_020_az)) <=
                len(mak_manif_data.isbn_020_az)) or (not bn_manif_data.isbn_020_az or not mak_manif_data.isbn_020_az):
 
-                print('ISBN case 1')
+                #print('ISBN case 1')
                 place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
                 num_pages = bn_manif_data.num_of_pages_300_a in [mak_manif_data.num_of_pages_300_a,
                                                                      mak_manif_data.num_of_pages_300_a - 1,
@@ -159,14 +159,14 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
 
                 if place_pub_260 and num_pages and b_form and edition:
                     matched_from_490_with_edition.add(candidate)
-                    print('There is a match - no editions or editions are the same.')
+                    #print('There is a match - no editions or editions are the same.')
                 if place_pub_260 and num_pages and b_form and not edition:
                     matched_from_490_without_edition.add(candidate)
-                    print('There is a match, but editions are different.')
+                    #print('There is a match, but editions are different.')
 
         if bn_manif_data.isbn_020_az and mak_manif_data.isbn_020_az and \
                 bn_manif_data.isbn_020_az == mak_manif_data.isbn_020_az:
-            print('ISBN case 2')
+            #print('ISBN case 2')
             place_pub_260 = bn_manif_data.place_pub_260_a_first_word == mak_manif_data.place_pub_260_a_first_word
             num_pages = bn_manif_data.num_of_pages_300_a in [mak_manif_data.num_of_pages_300_a,
                                                              mak_manif_data.num_of_pages_300_a - 1,
@@ -178,11 +178,11 @@ def match_manifestation(mak_manif, index_245=None, index_490=None, index_id=None
             if (place_pub_260 and num_pages and b_form and edition) or \
                (num_pages and b_form and edition and not place_pub_260):
                 matched_from_490_with_edition.add(candidate)
-                print('There is a match - no editions or editions are the same.')
+                #print('There is a match - no editions or editions are the same.')
 
             if place_pub_260 and num_pages and b_form and not edition:
                 matched_from_490_without_edition.add(candidate)
-                print('There is a match, but editions are different.')
+                #print('There is a match, but editions are different.')
 
     if matched_from_490_with_edition:
         return list(matched_from_490_with_edition)[0]

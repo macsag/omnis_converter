@@ -74,6 +74,60 @@ class BnItem(object):
         write_to_json(self.serialize_to_es_dump(), buffer, 'item_buffer')
 
 
+class PolonaItem(object):
+    __slots__ = ['mock_es_id', 'expression_ids', 'item_count', 'item_deleted_id',
+                 'item_local_bib_id', 'item_local_id', 'item_mat_id', 'item_source',
+                 'item_status', 'item_url', 'item_work_id', 'library', 'metadata_original',
+                 'metadata_source', 'modification_time', 'phrase_suggest', 'suggest', 'work_ids']
+
+    def __init__(self, bib_object, work, manifestation, expression, buffer):
+
+        # attributes for item_es_index
+        self.mock_es_id = str('119' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+        self.expression_ids = [str(expression.mock_es_id)]
+        self.item_count = 1
+        self.item_local_bib_id = str(to_single_value(get_values_by_field(bib_object, '001')))
+        self.item_local_id = str(to_single_value(get_values_by_field_and_subfield(bib_object, ('856', ['u']))))
+        self.item_mat_id = int(manifestation.mock_es_id)
+        self.item_url = str(to_single_value(get_values_by_field_and_subfield(bib_object, ('856', ['u']))))
+        self.item_work_id = int(work.mock_es_id)
+        self.library = {'digital': True, 'name': 'Polona.pl', 'id': 10945}  # hardcoded - always the same
+        self.metadata_original = str(uuid4())  # some random fake uuid
+        self.metadata_source = 'REFERENCE'
+        self.modification_time = '2019-10-11T17:45:21.527'  # fake time
+        self.phrase_suggest = ['-']
+        self.suggest = ['-']
+        self.work_ids = [str(work.mock_es_id)]
+        self.write_to_dump_file(buffer)
+
+    def __repr__(self):
+        return f'PolonaItem(id={self.mock_es_id}, item_count={self.item_count}, item_url={self.item_url}'
+
+    def serialize_to_es_dump(self):
+        dict_item = {"_index": "item", "_type": "item", "_id": self.mock_es_id,
+                     "_score": 1, "_source":
+                         {"expression_ids": self.expression_ids,
+                          "item_count": self.item_count,
+                          "item_local_bib_id": self.item_local_bib_id,
+                          "item_local_id": self.item_local_id,
+                          "item_mat_id": self.item_mat_id,
+                          "item_url": self.item_url,
+                          "item_work_id": self.item_work_id,
+                          "library": self.library,
+                          "metadata_original": self.metadata_original,
+                          "metadata_source": self.metadata_source,
+                          "modificationTime": self.modification_time,
+                          "phrase_suggest": self.phrase_suggest,
+                          "suggest": self.suggest,
+                          "work_ids": self.work_ids}}
+        json_item = json.dumps(dict_item, ensure_ascii=False)
+
+        return json_item
+
+    def write_to_dump_file(self, buffer):
+        write_to_json(self.serialize_to_es_dump(), buffer, 'item_buffer')
+
+
 class MakItem(object):
     __slots__ = ['mock_es_id', 'expression_ids', 'item_count',
                  'item_local_bib_id', 'item_mat_id', 'item_publication', 'item_service_url', 'item_source',

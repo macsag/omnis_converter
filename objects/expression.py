@@ -13,7 +13,8 @@ from objects.manifestation import Manifestation
 class Expression(object):
     __slots__ = ['uuid', 'manifestations', 'item_count', 'mock_es_id', 'expr_content_type', 'expr_contributor',
                  'expr_form', 'expr_lang', 'expr_leader_type', 'expr_title', 'expr_work', 'item_ids', 'libraries',
-                 'materialization_ids', 'metadata_source', 'modificationTime', 'phrase_suggest', 'suggest', 'work_ids']
+                 'materialization_ids', 'metadata_source', 'modificationTime', 'phrase_suggest', 'suggest', 'work_ids',
+                 'stat_digital', 'stat_digital_library_count', 'stat_public_domain']
 
     def __init__(self):
         self.uuid = uuid4()
@@ -37,6 +38,9 @@ class Expression(object):
         self.phrase_suggest = ['-']
         self.suggest = ['-']
         self.work_ids = None
+        self.stat_digital = False
+        self.stat_digital_library_count = 0
+        self.stat_public_domain = False
 
     def __repr__(self):
         return f'Expression(id={self.mock_es_id}, lang={self.expr_lang})'
@@ -77,6 +81,10 @@ class Expression(object):
                     self.libraries.append(lib)
                     lib_ids.add(lib['id'])
             self.item_count += m.stat_item_count
+            self.stat_digital = True if self.stat_digital or m.stat_digital else False
+            self.stat_public_domain = True if self.stat_public_domain or m.stat_public_domain else False
+            self.stat_digital_library_count = 1 if self.stat_digital_library_count == 1 or m.stat_public_domain == 1 \
+                else 0
 
     def write_to_dump_file(self, buffer):
         write_to_json(self.serialize_expression_for_expr_es_dump(), buffer, 'expr_buffer')

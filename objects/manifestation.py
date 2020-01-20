@@ -9,7 +9,7 @@ from commons.json_writer import write_to_json
 
 from descriptor_resolver.resolve_record import resolve_field_value, resolve_code_and_serialize, only_values
 
-from objects.item import BnItem
+from objects.item import BnItem, PolonaItem
 
 
 class Manifestation(object):
@@ -22,7 +22,7 @@ class Manifestation(object):
                  'mat_title_variant', 'metadata_original', 'metadata_source', 'modificationTime', 'phrase_suggest',
                  'popularity_join', 'stat_digital', 'stat_digital_library_count', 'stat_item_count',
                  'stat_library_count', 'stat_public_domain', 'suggest', 'work_creator', 'work_creators',
-                 'work_ids', 'bn_items', 'mak_items']
+                 'work_ids', 'bn_items', 'mak_items', 'polona_items']
 
     def __init__(self, bib_object, work, expression, buffer, descr_index, code_val_index):
         # attributes for manifestation_es_index
@@ -36,7 +36,7 @@ class Manifestation(object):
         self.mat_carrier_type = resolve_code_and_serialize(get_values_by_field_and_subfield(bib_object, ('338', ['b'])),
                                                            'carrier_type_dict',
                                                            code_val_index)
-        self.mat_contributor = []  # todo
+        self.mat_contributor = []
         self.mat_digital = False
         self.mat_edition = get_values_by_field(bib_object, '250')
         self.mat_external_id = get_values_by_field_and_subfield(bib_object, ('035', ['a']))
@@ -86,33 +86,59 @@ class Manifestation(object):
         self.work_ids = [int(work.mock_es_id)]
 
         self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
+        self.polona_items = [self.instantiate_polona_items(bib_object, work, expression, buffer)]
         self.mak_items = {}
 
     def __repr__(self):
         return f'Manifestation(id={self.mock_es_id}, title_and_resp={self.mat_title_and_resp}'
 
     def get_mat_contributors(self, bib_object, code_val_index, descr_index):
-        dict_val_700abcd = {}
-        list_val_710abcdn = set()
-        list_val_711abcdn = set()
+        dict_val_7xx = {}
 
         list_700_fields = bib_object.get_fields('700')
         if list_700_fields:
             for field in list_700_fields:
                 e_subflds = field.get_subfields('e')
-                if e_subflds:
+                if e_subflds and 'Autor' not in e_subflds and 'Autor domniemany' not in e_subflds\
+                        and 'Wywiad' not in e_subflds:
                     for e_sub in e_subflds:
                         e_sub_code_resolved = code_val_index['contribution_dict'].get(e_sub)
                         if e_sub_code_resolved:
-                            dict_val_700abcd.setdefault(e_sub_code_resolved.get('name'), set()).add(
+                            dict_val_7xx.setdefault(e_sub_code_resolved.get('name'), set()).add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
-        resolved_dict_700 = {}
-        for e_sub_value, set_700 in dict_val_700abcd.items():
-            resolved_dict_700.setdefault(e_sub_value, []).extend(
-                serialize_to_jsonl_descr(resolve_field_value(list(set_700), descr_index)))
-        if resolved_dict_700:
-            self.mat_contributor.append(resolved_dict_700)
+        list_710_fields = bib_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds and 'Autor' not in e_subflds and 'Autor domniemany' not in e_subflds \
+                        and 'Wywiad' not in e_subflds:
+                    for e_sub in e_subflds:
+                        e_sub_code_resolved = code_val_index['contribution_dict'].get(e_sub)
+                        if e_sub_code_resolved:
+                            dict_val_7xx.setdefault(e_sub_code_resolved.get('name'), set()).add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+        list_711_fields = bib_object.get_fields('711')
+        if list_711_fields:
+            for field in list_711_fields:
+                j_subflds = field.get_subfields('j')
+                if j_subflds and 'Autor' not in j_subflds and 'Autor domniemany' not in j_subflds \
+                        and 'Wywiad' not in j_subflds:
+                    for j_sub in j_subflds:
+                        j_sub_code_resolved = code_val_index['contribution_dict'].get(j_sub)
+                        if j_sub_code_resolved:
+                            dict_val_7xx.setdefault(j_sub_code_resolved.get('name'), set()).add(
+                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+
+        resolved_dict = {}
+
+        for e_or_j_sub_value, set_7xx in dict_val_7xx.items():
+            resolved_dict.setdefault(e_or_j_sub_value, []).extend(
+                serialize_to_jsonl_descr(resolve_field_value(list(set_7xx), descr_index)))
+        if resolved_dict:
+            for key, value in resolved_dict.items():
+                self.mat_contributor.append({'key': key, 'value': value})
 
     def get_work_creators(self, work):
         if work.main_creator:
@@ -137,13 +163,19 @@ class Manifestation(object):
     def get_mat_pub_dates(self, bib_object):
         v_008_06 = get_values_by_field(bib_object, '008')[0][6]
         if v_008_06 in ['r', 's', 'p', 't']:
-            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0')
-            self.mat_pub_date_single = int(v_008_0710)
+            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0')
+            try:
+                self.mat_pub_date_single = int(v_008_0710)
+            except ValueError:
+                pass
         else:
-            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0')
-            v_008_1114 = get_values_by_field(bib_object, '008')[0][11:15].replace('u', '0').replace(' ', '0')
-            self.mat_pub_date_from = int(v_008_0710)
-            self.mat_pub_date_to = int(v_008_1114)
+            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0')
+            v_008_1114 = get_values_by_field(bib_object, '008')[0][11:15].replace('u', '0').replace(' ', '0').replace('X', '0')
+            try:
+                self.mat_pub_date_from = int(v_008_0710)
+                self.mat_pub_date_to = int(v_008_1114)
+            except ValueError:
+                pass
 
     def get_publishers_all(self, bib_object):
         pl = get_values_by_field_and_subfield(bib_object, ('260', ['b']))
@@ -181,6 +213,15 @@ class Manifestation(object):
                 lib = lib_index.get(str(id_to_get))
                 if lib:
                     self.libraries.append(lib.get_serialized())
+        if self.polona_items:
+            for item in self.polona_items:
+                self.libraries.append({'digital': True,
+                                       'localization': {"lon": 21.0055165, "lat": 52.2140166},
+                                       'country': 'Polska',
+                                       'province': 'mazowieckie',
+                                       'city': 'Warszawa',
+                                       'name': 'polona.pl',
+                                       'id': 10945})
         if self.mak_items:
             for item in self.mak_items.values():
                 id_to_get = item.library['id']
@@ -200,6 +241,19 @@ class Manifestation(object):
             i = BnItem(bib_object, work, self, expression, buffer)
             self.item_ids.append(int(i_mock_es_id))
             self.stat_item_count += i.item_count
+            return i
+
+    def instantiate_polona_items(self, bib_object, work, expression, buffer):
+        list_856_uz = get_values_by_field_and_subfield(bib_object, ('856', ['u', 'z']))
+        if list_856_uz and 'Polonie' in to_single_value(list_856_uz):
+            i_mock_es_id = str('119' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+            i = PolonaItem(bib_object, work, self, expression, buffer)
+            self.item_ids.append(int(i_mock_es_id))
+            self.stat_item_count += i.item_count
+            self.stat_digital_library_count = 1
+            self.stat_digital = True
+            self.stat_public_domain = True
+            print('Instantiated polona item!')
             return i
 
     def get_mak_item_ids(self):
