@@ -1,16 +1,16 @@
-from commons.permissive_marc_reader import PermissiveMARCReader
+from pymarc import MARCReader
 import re
 
 
 def read_marc_from_file(file):
     with open(file, 'rb') as fp:
-        rdr = PermissiveMARCReader(fp, to_unicode=True, force_utf8=True, utf8_handling='ignore')
+        rdr = MARCReader(fp, to_unicode=True, force_utf8=True, utf8_handling='ignore', permissive=True)
         for rcd in rdr:
             yield rcd
 
 
 def read_marc_from_binary(data_chunk):
-    marc_rdr = PermissiveMARCReader(data_chunk, to_unicode=True, force_utf8=True, utf8_handling='ignore')
+    marc_rdr = MARCReader(data_chunk, to_unicode=True, force_utf8=True, utf8_handling='ignore', permissive=True)
     for rcd in marc_rdr:
         return rcd
 
