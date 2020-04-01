@@ -12,6 +12,7 @@ from objects.item import MakItem
 
 from commons.marc_iso_commons import read_marc_from_file, get_values_by_field_and_subfield, get_values_by_field
 from commons.json_writer import JsonBufferOut
+from commons.debugger import FRBRDebugger
 
 from indexers.descriptors_indexer import index_descriptors
 from indexers.code_value_indexer import code_value_indexer
@@ -298,6 +299,9 @@ def main_loop(configuration: dict):
     logging.debug(indexed_manifestations_bn_by_titles_245)
     logging.debug(indexed_manifestations_bn_by_titles_490)
 
+    #frbr_debugger = FRBRDebugger()
+    #frbr_debugger.log_indexed_works_by_uuid(indexed_works_by_uuid)
+
 
 if __name__ == '__main__':
 
@@ -313,7 +317,7 @@ if __name__ == '__main__':
                'code_val_file_in': './input_files/code_values/001_import.sql',
                'descr_files_in': './input_files/descriptors',
                'buffer': buff,
-               'run_manif_matcher': True,
+               'run_manif_matcher': False,
                'frbr_step_two': True,
                'limit': 5000,
                'limit_mak': 3}
