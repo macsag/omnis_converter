@@ -7,6 +7,7 @@ from commons.marc_iso_commons import is_dbn, truncate_title_from_246, serialize_
 from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, normalize_publisher
 from commons.marc_iso_commons import select_number_of_creators
 from commons.json_writer import write_to_json
+from commons.validators import is_number_of_1xx_fields_valid
 
 from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields, No008FieldFound
 
@@ -178,85 +179,83 @@ class Work(object):
         list_val_110abcdn = get_values_by_field_and_subfield(bib_object, ('110', ['0']))
         list_val_111abcdn = get_values_by_field_and_subfield(bib_object, ('111', ['0']))
 
-        # validate record
-        if (len(list_val_100abcd) > 1 or len(list_val_110abcdn) > 1 or len(list_val_111abcdn) > 1) or \
-                (list_val_100abcd and list_val_110abcdn and list_val_111abcdn):
-            raise TooMany1xxFields
-        else:
-            # 3.1.1.1 [CHECKED]
-            if list_val_100abcd:
-                self.main_creator.add(list_val_100abcd[0])
-                self.main_creator_real.add(list_val_100abcd[0])
-            if list_val_110abcdn:
-                self.main_creator.add(list_val_110abcdn[0])
-                self.main_creator_real.add(list_val_110abcdn[0])
-            if list_val_111abcdn:
-                self.main_creator.add(list_val_111abcdn[0])
-                self.main_creator_real.add(list_val_111abcdn[0])
+        # validate number of 1XX fields in record and raise exception if not
+        is_number_of_1xx_fields_valid(list_val_100abcd, list_val_110abcdn, list_val_111abcdn)
 
-            # 3.1.1.2 - if there is no 1XX field, check for 7XX [CHECKED]
-            list_val_700abcd = set()
-            list_val_710abcdn = set()
-            list_val_711abcdn = set()
+        # 3.1.1.1 [CHECKED]
+        if list_val_100abcd:
+            self.main_creator.add(list_val_100abcd[0])
+            self.main_creator_real.add(list_val_100abcd[0])
+        if list_val_110abcdn:
+            self.main_creator.add(list_val_110abcdn[0])
+            self.main_creator_real.add(list_val_110abcdn[0])
+        if list_val_111abcdn:
+            self.main_creator.add(list_val_111abcdn[0])
+            self.main_creator_real.add(list_val_111abcdn[0])
 
-            list_700_fields = bib_object.get_fields('700')
-            if list_700_fields:
-                for field in list_700_fields:
-                    e_subflds = field.get_subfields('e')
-                    if e_subflds:
-                        if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
-                            list_val_700abcd.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-                    else:
+        # 3.1.1.2 - if there is no 1XX field, check for 7XX [CHECKED]
+        list_val_700abcd = set()
+        list_val_710abcdn = set()
+        list_val_711abcdn = set()
+
+        list_700_fields = bib_object.get_fields('700')
+        if list_700_fields:
+            for field in list_700_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
                         list_val_700abcd.add(
                             ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                else:
+                    list_val_700abcd.add(
+                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
-            resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-            # only_values_from_list_700 = only_values(resolved_list_700)
+        resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
+        # only_values_from_list_700 = only_values(resolved_list_700)
 
-            if not self.main_creator:
-                self.main_creator.update(resolved_list_700)
-            self.main_creator_real.update(resolved_list_700)
+        if not self.main_creator:
+            self.main_creator.update(resolved_list_700)
+        self.main_creator_real.update(resolved_list_700)
 
-            list_710_fields = bib_object.get_fields('710')
-            if list_710_fields:
-                for field in list_710_fields:
-                    e_subflds = field.get_subfields('e')
-                    subflds_4 = field.get_subfields('4')
-                    if e_subflds:
-                        if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
-                            list_val_710abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                    if not e_subflds and not subflds_4:
+        list_710_fields = bib_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                subflds_4 = field.get_subfields('4')
+                if e_subflds:
+                    if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
                         list_val_710abcdn.add(
                             ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+                if not e_subflds and not subflds_4:
+                    list_val_710abcdn.add(
+                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
-            resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-            # only_values_from_list_710 = only_values(resolved_list_710)
+        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
+        # only_values_from_list_710 = only_values(resolved_list_710)
 
-            if not self.main_creator:
-                self.main_creator.update(resolved_list_710)
-            self.main_creator_real.update(resolved_list_710)
+        if not self.main_creator:
+            self.main_creator.update(resolved_list_710)
+        self.main_creator_real.update(resolved_list_710)
 
-            list_711_fields = bib_object.get_fields('711')
-            if list_711_fields:
-                for field in list_711_fields:
-                    j_subflds = field.get_subfields('j')
-                    subflds_4 = field.get_subfields('4')
-                    if j_subflds:
-                        if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
-                            list_val_711abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                    if not j_subflds and not subflds_4:
+        list_711_fields = bib_object.get_fields('711')
+        if list_711_fields:
+            for field in list_711_fields:
+                j_subflds = field.get_subfields('j')
+                subflds_4 = field.get_subfields('4')
+                if j_subflds:
+                    if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
                         list_val_711abcdn.add(
                             ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+                if not j_subflds and not subflds_4:
+                    list_val_711abcdn.add(
+                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
-            resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-            # only_values_from_list_711 = only_values(resolved_list_711)
+        resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
+        # only_values_from_list_711 = only_values(resolved_list_711)
 
-            if not self.main_creator:
-                self.main_creator.update(resolved_list_711)
-            self.main_creator_real.update(resolved_list_711)
+        if not self.main_creator:
+            self.main_creator.update(resolved_list_711)
+        self.main_creator_real.update(resolved_list_711)
 
     # 3.1.2
     def get_other_creator(self, bib_object, descr_index):
