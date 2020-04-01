@@ -7,6 +7,8 @@ from commons.marc_iso_commons import postprocess
 
 from commons.json_writer import write_to_json
 
+import config.mock_es_id_prefixes as esid
+
 
 class BnItem(object):
     __slots__ = ['mock_es_id', 'expression_ids', 'item_call_number', 'item_count', 'item_deleted_id',
@@ -17,7 +19,7 @@ class BnItem(object):
     def __init__(self, bib_object, work, manifestation, expression, buffer):
 
         # attributes for item_es_index
-        self.mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+        self.mock_es_id = str(esid.BN_ITEM_PREFIX + to_single_value(get_values_by_field(bib_object, '001'))[1:])
         self.expression_ids = [str(expression.mock_es_id)]
         self.item_call_number = get_values_by_field_and_subfield(bib_object, ('852', ['h']))
         self.item_count = len(get_values_by_field(bib_object, '852'))
@@ -45,7 +47,7 @@ class BnItem(object):
         return f'BnItem(id={self.mock_es_id}, item_count={self.item_count}, item_url={self.item_url}'
 
     def serialize_to_es_dump(self):
-        dict_item = {"_index": "item", "_type": "item", "_id": self.mock_es_id,
+        dict_item = {"_index": "item", "_type": "item", "_id": str(self.mock_es_id),
                      "_score": 1, "_source":
                          {"expression_ids": self.expression_ids,
                           "item_call_number": self.item_call_number,
@@ -83,7 +85,7 @@ class PolonaItem(object):
     def __init__(self, bib_object, work, manifestation, expression, buffer):
 
         # attributes for item_es_index
-        self.mock_es_id = str('119' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+        self.mock_es_id = str(esid.POLONA_ITEM_PREFIX + to_single_value(get_values_by_field(bib_object, '001'))[1:])
         self.expression_ids = [str(expression.mock_es_id)]
         self.item_count = 1
         self.item_local_bib_id = str(to_single_value(get_values_by_field(bib_object, '001')))
@@ -104,7 +106,7 @@ class PolonaItem(object):
         return f'PolonaItem(id={self.mock_es_id}, item_count={self.item_count}, item_url={self.item_url}'
 
     def serialize_to_es_dump(self):
-        dict_item = {"_index": "item", "_type": "item", "_id": self.mock_es_id,
+        dict_item = {"_index": "item", "_type": "item", "_id": str(self.mock_es_id),
                      "_score": 1, "_source":
                          {"expression_ids": self.expression_ids,
                           "item_count": self.item_count,

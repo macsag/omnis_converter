@@ -11,6 +11,8 @@ from descriptor_resolver.resolve_record import resolve_field_value, resolve_code
 
 from objects.item import BnItem, PolonaItem
 
+import config.mock_es_id_prefixes as esid
+
 
 class Manifestation(object):
     __slots__ = ['mock_es_id', 'eForm', 'expression_ids', 'item_ids', 'libraries', 'mat_carrier_type',
@@ -26,7 +28,7 @@ class Manifestation(object):
 
     def __init__(self, bib_object, work, expression, buffer, descr_index, code_val_index):
         # attributes for manifestation_es_index
-        self.mock_es_id = str('113' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+        self.mock_es_id = str(esid.MANIFESTATION_PREFIX + to_single_value(get_values_by_field(bib_object, '001'))[1:])
 
         self.eForm = only_values(resolve_field_value(
                 get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
@@ -237,7 +239,7 @@ class Manifestation(object):
     def instantiate_bn_items(self, bib_object, work, expression, buffer):
         list_852_fields = bib_object.get_fields('852')
         if list_852_fields:
-            i_mock_es_id = str('114' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+            i_mock_es_id = str(esid.BN_ITEM_PREFIX + to_single_value(get_values_by_field(bib_object, '001'))[1:])
             i = BnItem(bib_object, work, self, expression, buffer)
             self.item_ids.append(int(i_mock_es_id))
             self.stat_item_count += i.item_count
@@ -246,7 +248,7 @@ class Manifestation(object):
     def instantiate_polona_items(self, bib_object, work, expression, buffer):
         list_856_uz = get_values_by_field_and_subfield(bib_object, ('856', ['u', 'z']))
         if list_856_uz and 'Polonie' in to_single_value(list_856_uz):
-            i_mock_es_id = str('119' + to_single_value(get_values_by_field(bib_object, '001'))[1:])
+            i_mock_es_id = str(esid.POLONA_ITEM_PREFIX + to_single_value(get_values_by_field(bib_object, '001'))[1:])
             i = PolonaItem(bib_object, work, self, expression, buffer)
             self.item_ids.append(int(i_mock_es_id))
             self.stat_item_count += i.item_count

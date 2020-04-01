@@ -16,6 +16,8 @@ from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_se
 from objects.expression import Expression
 from objects.helper_objects import ObjCounter
 
+import config.mock_es_id_prefixes as esid
+
 
 class Work(object):
     __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'main_creator_real',
@@ -168,7 +170,7 @@ class Work(object):
         self.manifestations_bn_ids.add(get_values_by_field(bib_object, '001')[0])
 
     def create_mock_es_data_index_id(self):
-        self.mock_es_id = str('111' + list(self.manifestations_bn_ids)[0][1:])
+        self.mock_es_id = str(esid.WORK_PREFIX + str(list(self.manifestations_bn_ids)[0][1:]))
 
     # 3.1.1
     def get_main_creator(self, bib_object, descr_index):
@@ -1070,7 +1072,7 @@ class Work(object):
             write_to_json(jsonl, buffer, 'work_data_buffer')
 
     def serialize_work_for_es_work_dump(self):
-        dict_work = {"_index": "work", "_type": "work", "_id": self.mock_es_id,
+        dict_work = {"_index": "work", "_type": "work", "_id": str(self.mock_es_id),
                      "_score": 1, "_source":
                          {'eForm': list(self.filter_form),
                           'expression_ids': list(self.expression_ids),
