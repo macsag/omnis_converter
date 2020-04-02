@@ -3,7 +3,7 @@ import os
 
 from tqdm import tqdm
 
-from commons.marc_iso_commons import prepare_name_for_indexing
+from commons.normalization import prepare_name_for_indexing
 
 
 def index_descriptors(path_dir):
