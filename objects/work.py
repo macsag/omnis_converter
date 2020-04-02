@@ -182,7 +182,7 @@ class Work(object):
         # validate number of 1XX fields in record and raise exception if not
         is_number_of_1xx_fields_valid(list_val_100abcd, list_val_110abcdn, list_val_111abcdn)
 
-        # 3.1.1.1 [CHECKED]
+        # 3.1.1.1 - there is 1XX field [CHECKED]
         if list_val_100abcd:
             self.main_creator.add(list_val_100abcd[0])
             self.main_creator_real.add(list_val_100abcd[0])
