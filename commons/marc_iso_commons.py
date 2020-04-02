@@ -91,18 +91,6 @@ def get_rid_of_punctuation(value):
     return ''.join(char.replace(',', '').replace('.', '') for char in value)
 
 
-def prepare_name_for_indexing(value):
-    if value:
-        value = ''.join(char.replace('  ', ' ').replace(',', '').replace('.', '') for char in value)
-        match = re.search(r'^\W+', value)
-        if match:
-            value = value[match.span(0)[1]:]
-        match = re.search(r'\W+$', value)
-        if match:
-            value = value[:match.span(0)[0]]
-    return value
-
-
 def postprocess(postprocess_method, list_of_values):
     if list_of_values:
         processed_list_of_values = []
