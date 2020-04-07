@@ -2,12 +2,12 @@ from uuid import uuid4
 import json
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.marc_iso_commons import truncate_title_proper, read_marc_from_binary, normalize_title_for_frbr_indexing
-from commons.marc_iso_commons import is_dbn, truncate_title_from_246, serialize_to_list_of_values
+from commons.marc_iso_commons import read_marc_from_binary, is_dbn, serialize_to_list_of_values
 from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, normalize_publisher
 from commons.marc_iso_commons import select_number_of_creators
 from commons.json_writer import write_to_json
 from commons.validators import is_number_of_1xx_fields_valid
+from commons.normalization import prepare_name_for_indexing, normalize_title
 
 from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields, No008FieldFound
 
@@ -324,13 +324,13 @@ class Work(object):
         # get titles from 245 field
         lang_008 = field_008_raw[0].value()[35:38]
 
-        list_val_245ab = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
+        list_val_245ab = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
                                                                                              ('245', ['a', 'b'])))
         title_245_raw_ind = title_245_raw[0].indicators
-        list_val_245a = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object,
+        list_val_245a = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
                                                                                             ('245', ['a'])))
         val_245a_last_char = get_values_by_field_and_subfield(bib_object, ('245', ['a']))[0][-1]
-        list_val_245p = postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object, ('245', ['p'])))
+        list_val_245p = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object, ('245', ['p'])))
 
         if val_245a_last_char == '=' and not list_val_245p:
             to_add = list_val_245a[0]
@@ -394,14 +394,14 @@ class Work(object):
                 if not field.get_subfields('i') and field.get_subfields('a', 'b'):
                     list_val_246_other.append(' '.join(field.get_subfields('a', 'b')))
 
-        list_val_246_title_orig = postprocess(truncate_title_from_246, list_val_246_title_orig)
+        list_val_246_title_orig = postprocess(normalize_title, list_val_246_title_orig)
         lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
 
         if len(lang_041_h) == 1 and len(list_val_246_title_orig) == 1:
             self.titles246_title_orig.setdefault(lang_041_h[0], {}).setdefault(list_val_246_title_orig[0],
                                                                                ObjCounter()).add(1)
 
-        list_val_246_other = postprocess(truncate_title_from_246, list_val_246_other)
+        list_val_246_other = postprocess(normalize_title, list_val_246_other)
         for val in list_val_246_other:
             self.titles246_title_other.setdefault(val, ObjCounter()).add(1)
 
@@ -521,7 +521,7 @@ class Work(object):
         for title_dict in self.titles245.values():
             for title in title_dict.keys():
                 # no such title - append empty list
-                normalized_title = normalize_title_for_frbr_indexing(title)
+                normalized_title = prepare_name_for_indexing(normalize_title(title))
                 if normalized_title not in works_by_titles:
                     candidate_works_by_245_title.setdefault(title, [])
                 # title found - append candidate uuids
@@ -531,7 +531,7 @@ class Work(object):
         for title_dict in self.titles246_title_orig.values():
             for title in title_dict.keys():
                 # no such title - append empty list
-                normalized_title = normalize_title_for_frbr_indexing(title)
+                normalized_title = prepare_name_for_indexing(normalize_title(title))
                 if normalized_title not in works_by_titles:
                     candidate_works_by_246_title_orig.setdefault(title, [])
                 # title found - append candidate uuids
@@ -540,7 +540,7 @@ class Work(object):
 
         for title in self.titles246_title_other.keys():
             # no such title - append empty list
-            normalized_title = normalize_title_for_frbr_indexing(title)
+            normalized_title = prepare_name_for_indexing(normalize_title(title))
             if normalized_title not in works_by_titles:
                 candidate_works_by_246_title_other.setdefault(title, [])
             # title found - append candidate uuids
@@ -549,7 +549,7 @@ class Work(object):
 
         for title in list(self.titles240):
             # no such title - append empty list
-            normalized_title = normalize_title_for_frbr_indexing(title)
+            normalized_title = prepare_name_for_indexing(normalize_title(title))
             if normalized_title not in works_by_titles:
                 candidate_works_by_240_title.setdefault(title, [])
             # title found - append candidate uuids
@@ -621,14 +621,14 @@ class Work(object):
             # index new work by titles and by uuid
             for title_dict in self.titles245.values():
                 for title in title_dict.keys():
-                    works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
+                    works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
             for title_dict in self.titles246_title_orig.values():
                 for title in title_dict.keys():
-                    works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
+                    works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
             for title in self.titles240:
-                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
+                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
             for title in self.titles246_title_other.keys():
-                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(self.uuid)
+                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
 
             works_by_uuid.setdefault(self.uuid, self)
             #print('Added new work.')
@@ -658,7 +658,7 @@ class Work(object):
         for title_dict in self.titles245.values():
             for title in title_dict.keys():
                 # no such title - append empty list
-                normalized_title = normalize_title_for_frbr_indexing(title)
+                normalized_title = prepare_name_for_indexing(normalize_title(title))
                 if normalized_title not in works_by_titles:
                     candidate_works_by_245_title.setdefault(title, [])
                 # title found - append candidate uuids
@@ -667,7 +667,7 @@ class Work(object):
 
         for title_dict in self.titles246_title_orig.values():
             for title in title_dict.keys():
-                normalized_title = normalize_title_for_frbr_indexing(title)
+                normalized_title = prepare_name_for_indexing(normalize_title(title))
                 # no such title - append empty list
                 if normalized_title not in works_by_titles:
                     candidate_works_by_246_title_orig.setdefault(title, [])
@@ -677,7 +677,7 @@ class Work(object):
 
         for title in self.titles246_title_other.keys():
             # no such title - append empty list
-            normalized_title = normalize_title_for_frbr_indexing(title)
+            normalized_title = prepare_name_for_indexing(normalize_title(title))
             if normalized_title not in works_by_titles:
                 candidate_works_by_246_title_other.setdefault(title, [])
             # title found - append candidate uuids
@@ -686,7 +686,7 @@ class Work(object):
 
         for title in list(self.titles240):
             # no such title - append empty list
-            normalized_title = normalize_title_for_frbr_indexing(title)
+            normalized_title = prepare_name_for_indexing(normalize_title(title))
             if normalized_title not in works_by_titles:
                 candidate_works_by_240_title.setdefault(title, [])
             # title found - append candidate uuids
@@ -790,14 +790,14 @@ class Work(object):
     def index_matched_work_by_titles(matched_work, works_by_titles):
         for title_dict in matched_work.titles245.values():
             for title in title_dict.keys():
-                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
+                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
         for title_dict in matched_work.titles246_title_orig.values():
             for title in title_dict.keys():
-                works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
+                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
         for title in matched_work.titles240:
-            works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
+            works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
         for title in matched_work.titles246_title_other.keys():
-            works_by_titles.setdefault(normalize_title_for_frbr_indexing(title), set()).add(matched_work.uuid)
+            works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
 
     def get_pub_country(self, bib_object):
         pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
