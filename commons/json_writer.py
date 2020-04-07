@@ -24,7 +24,7 @@ def write_to_json(json_line, json_buffer_out: JsonBufferOut, buffer):
     buff[2].append(json_line)
     buff[1].add(1)
 
-    if buff[1].count % 500 == 0:
+    if buff[1].count % 1000 == 0:
         with open(buff[0], 'a', encoding='utf-8') as fp:
             for line in buff[2]:
                 fp.write(f'{line}\n')
