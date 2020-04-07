@@ -1,4 +1,4 @@
-from commons.marc_iso_commons import prepare_name_for_indexing
+from commons.normalization import prepare_name_for_indexing
 from exceptions.exceptions import DescriptorNotResolved
 
 FIELDS_TO_CHECK = [('100', ['a', 'b', 'c', 'd']),
