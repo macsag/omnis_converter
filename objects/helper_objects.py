@@ -8,7 +8,7 @@ class ObjCounter(object):
         self.count = 0
 
     def __repr__(self):
-        return f'ObjCounter(title_count={self.count}'
+        return f'ObjCounter(title_count={self.count})'
 
     def add(self, number_to_add):
         self.count += number_to_add

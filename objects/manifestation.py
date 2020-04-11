@@ -14,6 +14,17 @@ from objects.item import BnItem, PolonaItem
 import config.mock_es_id_prefixes as esid
 
 
+class FRBRManifestation(object):
+    __slots__ = ['uuid']
+
+    def __init__(self):
+        self.uuid = uuid4()
+
+    def __repr__(self):
+        return f'Manifestation(id={self.uuid})'
+
+
+
 class Manifestation(object):
     __slots__ = ['mock_es_id', 'eForm', 'expression_ids', 'item_ids', 'libraries', 'mat_carrier_type',
                  'mat_contributor', 'mat_digital', 'mat_edition', 'mat_external_id', 'mat_isbn',

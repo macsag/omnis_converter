@@ -12,40 +12,49 @@ from objects.manifestation import Manifestation
 import config.mock_es_id_prefixes as esid
 
 
+class FRBRExpression(object):
+    __slots__ = ['uuid', 'manifestations', 'expression_distinctive_tuple']
+
+    def __init__(self, expression_distinctive_tuple):
+        self.uuid = uuid4()
+        self.manifestations = {}
+        self.expression_distinctive_tuple = expression_distinctive_tuple
+
+    def __repr__(self):
+        return f'Expression(id={self.uuid}, expression_distinctive_tuple={self.expression_distinctive_tuple})'
+
+
 class Expression(object):
-    __slots__ = ['uuid', 'manifestations', 'item_count', 'mock_es_id', 'expr_content_type', 'expr_contributor',
-                 'expr_form', 'expr_lang', 'expr_leader_type', 'expr_title', 'expr_work', 'item_ids', 'libraries',
-                 'materialization_ids', 'metadata_source', 'modificationTime', 'phrase_suggest', 'suggest', 'work_ids',
-                 'stat_digital', 'stat_digital_library_count', 'stat_public_domain']
+    __slots__ = ['uuid', 'manifestations']
 
     def __init__(self):
         self.uuid = uuid4()
-        self.manifestations = []
-        self.item_count = 0
-
-        # attributes for expression_es_index
-        self.mock_es_id = None
-        self.expr_content_type = []  # todo (but for now in ES it doesn't work as well)
-        self.expr_contributor = None  # todo (but for now in ES it doesn't work as well)
-        self.expr_form = None
-        self.expr_lang = None
-        self.expr_leader_type = None
-        self.expr_title = None
-        self.expr_work = None
-        self.item_ids = []
-        self.libraries = []
-        self.materialization_ids = []
-        self.metadata_source = 'REFERENCE'
-        self.modificationTime = "2019-10-01T13:34:23.580"
-        self.phrase_suggest = ['-']
-        self.suggest = ['-']
-        self.work_ids = None
-        self.stat_digital = False
-        self.stat_digital_library_count = 0
-        self.stat_public_domain = False
+        self.manifestations = {}
+        # self.item_count = 0
+        #
+        # # attributes for expression_es_index
+        # self.mock_es_id = None
+        # self.expr_content_type = []  # todo (but for now in ES it doesn't work as well)
+        # self.expr_contributor = None  # todo (but for now in ES it doesn't work as well)
+        # self.expr_form = None
+        # self.expr_lang = None
+        # self.expr_leader_type = None
+        # self.expr_title = None
+        # self.expr_work = None
+        # self.item_ids = []
+        # self.libraries = []
+        # self.materialization_ids = []
+        # self.metadata_source = 'REFERENCE'
+        # self.modificationTime = "2019-10-01T13:34:23.580"
+        # self.phrase_suggest = ['-']
+        # self.suggest = ['-']
+        # self.work_ids = None
+        # self.stat_digital = False
+        # self.stat_digital_library_count = 0
+        # self.stat_public_domain = False
 
     def __repr__(self):
-        return f'Expression(id={self.mock_es_id}, lang={self.expr_lang})'
+        return f'Expression(id={self.uuid}, lang={self.expr_lang})'
 
     def add(self, bib_object, work, buffer, descr_index, code_val_index):
         if not self.mock_es_id:

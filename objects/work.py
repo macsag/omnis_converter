@@ -9,8 +9,6 @@ from commons.json_writer import write_to_json
 from commons.validators import is_number_of_1xx_fields_valid
 from commons.normalization import prepare_name_for_indexing, normalize_title
 
-from exceptions.exceptions import TooMany1xxFields, No245FieldFoundOrTooMany245Fields, No008FieldFound
-
 from descriptor_resolver.resolve_record import resolve_field_value, only_values
 from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_serialize
 

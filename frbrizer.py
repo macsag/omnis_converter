@@ -5,8 +5,9 @@ import os
 from tqdm import tqdm
 from pymarc import parse_xml_to_array
 
-from exceptions.exceptions import DescriptorNotResolved
+import exceptions.exceptions as oe
 
+from objects.frbr_cluster import FRBRCluster
 from objects.work import Work
 from objects.item import MakItem
 
@@ -85,26 +86,33 @@ def is_245_indicator_2_valid(pymarc_object):
 
 
 def main_loop(configuration: dict):
-    indexed_works_by_uuid = {}
-    indexed_works_by_titles = {}
-    indexed_works_by_mat_nlp_id = {}
+    # dict with real FRBRCluster objects by uuid
+    indexed_frbr_clusters_by_uuid = {}
+
+    # helper dict for matching: {'title': [FRBRCluster uuid, ...]}
+    indexed_frbr_clusters_by_titles = {}
+
+    # helper dict for garbage collection:
+    # {'raw_record_id': {'current_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...),
+    # 'previous_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...)}}
+    indexed_frbr_clusters_by_raw_record_id = {}
 
     indexed_manifestations_bn_by_nlp_id = {}
     indexed_manifestations_bn_by_titles_245 = {}
     indexed_manifestations_bn_by_titles_490 = {}
 
     # prepare indexes
-    logging.info('Indexing institutions...')
-    indexed_libs_by_mak_id, indexed_libs_by_es_id = create_lib_indexes(configuration['inst_file_in'])
-    logging.info('DONE!')
-
-    logging.info('Indexing codes and values...')
-    indexed_code_values = code_value_indexer(configuration['code_val_file_in'])
-    logging.info('DONE!')
-
-    logging.info('Indexing descriptors...')
-    indexed_descriptors = index_descriptors(configuration['descr_files_in'])
-    logging.info('DONE!')
+    # logging.info('Indexing institutions...')
+    # indexed_libs_by_mak_id, indexed_libs_by_es_id = create_lib_indexes(configuration['inst_file_in'])
+    # logging.info('DONE!')
+    #
+    # logging.info('Indexing codes and values...')
+    # indexed_code_values = code_value_indexer(configuration['code_val_file_in'])
+    # logging.info('DONE!')
+    #
+    # logging.info('Indexing descriptors...')
+    # indexed_descriptors = index_descriptors(configuration['descr_files_in'])
+    # logging.info('DONE!')
 
     # start main loop - iterate through all bib records (only books) from BN
     logging.info('Starting main loop...')
@@ -118,37 +126,62 @@ def main_loop(configuration: dict):
             if counter > configuration['limit']:
                 break
 
+            # create FRBRCluster instance and get from raw parsed record data needed for matching
+            frbr_cluster = FRBRCluster()
+
+            frbr_cluster.get_raw_record_id(bib)
+
             try:
-                bib = resolve_record(bib, indexed_descriptors)
-            except DescriptorNotResolved as error:
-                logging.debug(error)
+                frbr_cluster.get_main_creator(bib)
+            except oe.TooMany1xxFields:
                 continue
 
-            # create stub work and get from manifestation data needed for work matching
-            work = Work()
-            work.get_manifestation_bn_id(bib)
-            work.get_main_creator(bib, indexed_descriptors)
-            work.get_other_creator(bib, indexed_descriptors)
-            work.get_titles(bib)
+            frbr_cluster.get_other_creator(bib)
+
+            try:
+                frbr_cluster.get_titles(bib)
+            except (oe.TooMany245Fields, oe.No245FieldFound):
+                continue
+
+            frbr_cluster.get_expression_distinctive_tuple(bib)
+
+            frbr_cluster.match_and_index(indexed_frbr_clusters_by_uuid,
+                                         indexed_frbr_clusters_by_titles,
+                                         indexed_frbr_clusters_by_raw_record_id)
+
+
+
+
+
+            # create stub work and get
+            # work = Work()
+            # work.get_manifestation_bn_id(bib)
+            # work.get_main_creator(bib, indexed_descriptors)
+            # work.get_other_creator(bib, indexed_descriptors)
+            # work.get_titles(bib)
 
             counter += 1
 
-            # try to match with existing work (and if there is a match: merge to one work and index by all titles)
-            # if there is no match, index new work by titles and by uuid
-            work.match_with_existing_work_and_index(indexed_works_by_uuid, indexed_works_by_titles)
+            # # try to match with existing work (and if there is a match: merge to one work and index by all titles)
+            # # if there is no match, index new work by titles and by uuid
+            # work.match_with_existing_work_and_index(indexed_works_by_uuid, indexed_works_by_titles)
+            #
+            # # decompose raw record and create
+            #
+            # # index original bib record by bn_id - fast lookup for conversion and manifestation matching
+            # indexed_manifestations_bn_by_nlp_id.setdefault(get_values_by_field(bib, '001')[0], bib.as_marc())
+            #
+            # # index manifestation for matching with mak+ by 245 titles and 490 titles
+            # titles_for_manif_match = get_titles_for_manifestation_matching(bib)
+            #
+            # for title in titles_for_manif_match.get('titles_245'):
+            #     indexed_manifestations_bn_by_titles_245.setdefault(title, set()).add(get_values_by_field(bib, '001')[0])
+            # for title in titles_for_manif_match.get('titles_490'):
+            #     indexed_manifestations_bn_by_titles_490.setdefault(title, set()).add(get_values_by_field(bib, '001')[0])
 
-            # index original bib record by bn_id - fast lookup for conversion and manifestation matching
-            indexed_manifestations_bn_by_nlp_id.setdefault(get_values_by_field(bib, '001')[0], bib.as_marc())
 
-            # index manifestation for matching with mak+ by 245 titles and 490 titles
-            titles_for_manif_match = get_titles_for_manifestation_matching(bib)
 
-            for title in titles_for_manif_match.get('titles_245'):
-                indexed_manifestations_bn_by_titles_245.setdefault(title, set()).add(get_values_by_field(bib, '001')[0])
-            for title in titles_for_manif_match.get('titles_490'):
-                indexed_manifestations_bn_by_titles_490.setdefault(title, set()).add(get_values_by_field(bib, '001')[0])
-
-    logging.info('DONE!')
+    # logging.info('DONE!')
 
     if configuration['frbr_step_two']:
 
@@ -166,27 +199,27 @@ def main_loop(configuration: dict):
 
     logging.info('Conversion in progress...')
 
-    for work_uuid, indexed_work in tqdm(indexed_works_by_uuid.items()):
-        # do conversion, upsert expressions and instantiate manifestations and BN items
-        if indexed_work:
-            print(indexed_work.titles245)
-            indexed_work.convert_to_work(indexed_manifestations_bn_by_nlp_id,
-                                         configuration['buffer'],
-                                         indexed_descriptors,
-                                         indexed_code_values)
-
-            logging.debug(f'\n{indexed_work.mock_es_id}')
-
-            for expression in indexed_work.expressions_dict.values():
-                logging.debug(f'    {expression}')
-
-                for manifestation in expression.manifestations:
-                    # index works by manifestations nlp id for inserting MAK+ items
-                    indexed_works_by_mat_nlp_id.setdefault(manifestation.mat_nlp_id, indexed_work.uuid)
-
-                    logging.debug(f'        {manifestation}')
-                    for i in manifestation.bn_items:
-                        logging.debug(f'            {i}')
+    # for work_uuid, indexed_work in tqdm(indexed_works_by_uuid.items()):
+    #     # do conversion, upsert expressions and instantiate manifestations and BN items
+    #     if indexed_work:
+    #         print(indexed_work.titles245)
+    #         indexed_work.convert_to_work(indexed_manifestations_bn_by_nlp_id,
+    #                                      configuration['buffer'],
+    #                                      indexed_descriptors,
+    #                                      indexed_code_values)
+    #
+    #         logging.debug(f'\n{indexed_work.mock_es_id}')
+    #
+    #         for expression in indexed_work.expressions_dict.values():
+    #             logging.debug(f'    {expression}')
+    #
+    #             for manifestation in expression.manifestations:
+    #                 # index works by manifestations nlp id for inserting MAK+ items
+    #                 indexed_works_by_mat_nlp_id.setdefault(manifestation.mat_nlp_id, indexed_work.uuid)
+    #
+    #                 logging.debug(f'        {manifestation}')
+    #                 for i in manifestation.bn_items:
+    #                     logging.debug(f'            {i}')
 
     logging.info('DONE!')
 
@@ -264,40 +297,40 @@ def main_loop(configuration: dict):
     # - getting mak item ids and count, manifestation ids and couun, expresions ids and count for work
     # - serializing and writing works to json file
 
-    for indexed_work in tqdm(indexed_works_by_uuid.values()):
-        if indexed_work:
-            logging.debug(f'\n{indexed_work.mock_es_id}')
-
-            for expression in indexed_work.expressions_dict.values():
-                logging.debug(f'    {expression}')
-
-                for manifestation in expression.manifestations:
-
-                    for num, item in enumerate(manifestation.mak_items.values(), start=1):
-                        item.mock_es_id = f'{str(num)}{str(manifestation.mock_es_id)}'
-                        item.write_to_dump_file(buff)
-
-                    manifestation.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
-                    manifestation.get_mak_item_ids()
-                    manifestation.write_to_dump_file(buff)
-                    logging.debug(f'        {manifestation}')
-
-                    #for i in manif.bn_items:
-                        #print(f'            BN - {i}')
-                    #for im in manif.mak_items.values():
-                        #print(f'            MAK - {im}')
-
-                expression.get_item_ids_item_count_and_libraries()
-                expression.write_to_dump_file(buff)
-
-            indexed_work.get_expr_manif_item_ids_and_counts()
-            indexed_work.write_to_dump_file(buff)
-
-    logging.debug(indexed_works_by_uuid)
-    logging.debug(indexed_works_by_titles)
-    logging.debug(indexed_manifestations_bn_by_nlp_id)
-    logging.debug(indexed_manifestations_bn_by_titles_245)
-    logging.debug(indexed_manifestations_bn_by_titles_490)
+    # for indexed_work in tqdm(indexed_works_by_uuid.values()):
+    #     if indexed_work:
+    #         logging.debug(f'\n{indexed_work.mock_es_id}')
+    #
+    #         for expression in indexed_work.expressions_dict.values():
+    #             logging.debug(f'    {expression}')
+    #
+    #             for manifestation in expression.manifestations:
+    #
+    #                 for num, item in enumerate(manifestation.mak_items.values(), start=1):
+    #                     item.mock_es_id = f'{str(num)}{str(manifestation.mock_es_id)}'
+    #                     item.write_to_dump_file(buff)
+    #
+    #                 manifestation.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
+    #                 manifestation.get_mak_item_ids()
+    #                 manifestation.write_to_dump_file(buff)
+    #                 logging.debug(f'        {manifestation}')
+    #
+    #                 #for i in manif.bn_items:
+    #                     #print(f'            BN - {i}')
+    #                 #for im in manif.mak_items.values():
+    #                     #print(f'            MAK - {im}')
+    #
+    #             expression.get_item_ids_item_count_and_libraries()
+    #             expression.write_to_dump_file(buff)
+    #
+    #         indexed_work.get_expr_manif_item_ids_and_counts()
+    #         indexed_work.write_to_dump_file(buff)
+    #
+    # logging.debug(indexed_works_by_uuid)
+    # logging.debug(indexed_works_by_titles)
+    # logging.debug(indexed_manifestations_bn_by_nlp_id)
+    # logging.debug(indexed_manifestations_bn_by_titles_245)
+    # logging.debug(indexed_manifestations_bn_by_titles_490)
 
     #frbr_debugger = FRBRDebugger()
     #frbr_debugger.log_indexed_works_by_uuid(indexed_works_by_uuid)
@@ -318,7 +351,7 @@ if __name__ == '__main__':
                'descr_files_in': './input_files/descriptors',
                'buffer': buff,
                'run_manif_matcher': False,
-               'frbr_step_two': True,
+               'frbr_step_two': False,
                'limit': 5000,
                'limit_mak': 3}
 
