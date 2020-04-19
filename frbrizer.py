@@ -1,11 +1,16 @@
 import logging
 import sys
 import os
+import pickle
+import redis
 
 from tqdm import tqdm
 from pymarc import parse_xml_to_array
 
+from analyzer import analyze_record_and_produce_frbr_clusters
+
 import exceptions.exceptions as oe
+import commons.validators as c_valid
 
 from objects.frbr_cluster import FRBRCluster
 from objects.work import Work
@@ -22,59 +27,6 @@ from indexers.inst_indexer import create_lib_indexes
 from manifestation_matcher.manif_matcher import get_titles_for_manifestation_matching, match_manifestation
 
 from descriptor_resolver.resolve_record import resolve_record
-
-
-# 1
-def is_book_ebook_audiobook(pymarc_object):
-    val_380a = get_values_by_field_and_subfield(pymarc_object, ('380', ['a']))
-    val_ldr67 = pymarc_object.leader[6:8]
-
-    values_380a_to_check = ['Książki', 'Audiobooki', 'E-booki']
-    values_ldr67_to_check = ['am', 'im']
-
-    if val_ldr67 in values_ldr67_to_check:
-        for value in values_380a_to_check:
-            if value in val_380a:
-                return True
-        else:
-            return False
-    else:
-        return False
-
-
-# 2.1
-def is_single_work(pymarc_object):
-    # each and every record MUST have these fields, if it hasn't, it should be treated as invalid and skipped
-    try:
-        val_245a_last_char = get_values_by_field_and_subfield(pymarc_object, ('245', ['a']))[0][-1]
-        val_245a = get_values_by_field_and_subfield(pymarc_object, ('245', ['a']))[0]
-        val_245c = get_values_by_field_and_subfield(pymarc_object, ('245', ['c']))[0]
-    except IndexError:
-        logging.debug('Invalid record.')
-        return False
-
-    list_val_245b = get_values_by_field_and_subfield(pymarc_object, ('245', ['b']))
-    val_245b = list_val_245b[0] if list_val_245b else ''
-
-    list_val_730 = get_values_by_field(pymarc_object, '730')
-    list_val_501 = get_values_by_field(pymarc_object, '501')
-    list_val_505 = get_values_by_field(pymarc_object, '505')
-    list_val_740 = get_values_by_field(pymarc_object, '740')
-    list_val_700t = get_values_by_field_and_subfield(pymarc_object, ('700', ['t']))
-    list_val_710t = get_values_by_field_and_subfield(pymarc_object, ('710', ['t']))
-    list_val_711t = get_values_by_field_and_subfield(pymarc_object, ('711', ['t']))
-    list_val_246i = get_values_by_field_and_subfield(pymarc_object, ('246', ['i']))
-
-    is_2_1_1_1 = val_245a_last_char != ';' and ' ; ' not in val_245a and ' ; ' not in val_245b and ' / 'not in val_245c
-    is_2_1_1_2 = True if not list_val_730 or (len(list_val_730) == 1 and 'Katalog wystawy' in list_val_730[0]) else False
-    is_2_1_1_3 = True if not list_val_501 and not list_val_505 and not list_val_740 else False
-    is_2_1_1_4 = True if not list_val_700t and not list_val_710t and not list_val_711t else False
-    is_2_1_1_5 = True if len([x for x in list_val_246i if 'Tyt. oryg.' in x or 'Tytuł oryginału' in x]) < 2 else False
-
-    if is_2_1_1_1 and is_2_1_1_2 and is_2_1_1_3 and is_2_1_1_4 and is_2_1_1_5:
-        return True
-    else:
-        return False
 
 
 def has_items(pymarc_object):
@@ -122,32 +74,40 @@ def main_loop(configuration: dict):
     counter = 0
 
     for bib in tqdm(read_marc_from_file(configuration['bn_file_in'])):
-        if is_book_ebook_audiobook(bib) and is_single_work(bib) and has_items(bib) and is_245_indicator_2_valid(bib):
+        if c_valid.is_document_type(bib) and \
+                c_valid.is_single_or_multi_work(bib) == 'single_work' and \
+                has_items(bib) and \
+                is_245_indicator_2_valid(bib):
+
             if counter > configuration['limit']:
                 break
 
-            # create FRBRCluster instance and get from raw parsed record data needed for matching
-            frbr_cluster = FRBRCluster()
+            # analyze bib record
+            # and create one or more FRBRCluster instances (one if single work bib, two or more if multiwork bib)
+            # and get from raw parsed record data needed for matching each or them
+            frbr_clusters_list = analyze_record_and_produce_frbr_clusters(bib)
 
-            frbr_cluster.get_raw_record_id(bib)
+            # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
+            # or create and index new frbr_cluster
+            for frbr_cluster in frbr_clusters_list:
+                # has the raw record been already matched?
+                # has data needed for matching produced clusters changed?
+                # check this by looking up in indexed hashes (by raw_record_id)
+                # of frbr_cluster_match_data, expression_match_data and manifestation_match_data
+                # for each cluster produced by raw record
+                # if nothing changed, there is nothing to do in matcher
+                # pass record and related frbr_clusters directly to converter
+                # (other data still may have been changed)
 
-            try:
-                frbr_cluster.get_main_creator(bib)
-            except oe.TooMany1xxFields:
-                continue
+                frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
+                    frbr_cluster.original_raw_record_id)
 
-            frbr_cluster.get_other_creator(bib)
+                if frbr_cluster_match_info:
+                    frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
 
-            try:
-                frbr_cluster.get_titles(bib)
-            except (oe.TooMany245Fields, oe.No245FieldFound):
-                continue
-
-            frbr_cluster.get_expression_distinctive_tuple(bib)
-
-            frbr_cluster.match_and_index(indexed_frbr_clusters_by_uuid,
-                                         indexed_frbr_clusters_by_titles,
-                                         indexed_frbr_clusters_by_raw_record_id)
+                frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
+                                                  indexed_frbr_clusters_by_titles,
+                                                  indexed_frbr_clusters_by_raw_record_id)
 
 
 
@@ -341,10 +301,14 @@ if __name__ == '__main__':
     logging.root.addHandler(logging.StreamHandler(sys.stdout))
     logging.root.setLevel(level=logging.DEBUG)
 
+    r_client_frbr_clusters_by_uuid = redis.Redis(db=0)
+    r_client_frbr_cluster_by_title = redis.Redis(db=1)
+    r_client_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
+
     buff = JsonBufferOut('./output/item.json', './output/materialization.json', './output/expression.json',
                          './output/work.json', './output/expression_data.json', './output/work_data.json')
 
-    configs = {'bn_file_in': './input_files/bib_records/bn/quo_vadis.mrc',
+    configs = {'bn_file_in': './input_files/bib_records/bn/bibs-ksiazka.marc',
                'mak_files_in': './input_files/bib_records/mak',
                'inst_file_in': './input_files/institutions/manager-library.json',
                'code_val_file_in': './input_files/code_values/001_import.sql',
@@ -352,7 +316,7 @@ if __name__ == '__main__':
                'buffer': buff,
                'run_manif_matcher': False,
                'frbr_step_two': False,
-               'limit': 5000,
+               'limit': 10000,
                'limit_mak': 3}
 
     main_loop(configs)

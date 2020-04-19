@@ -1,0 +1,2 @@
+VALUES_380A_TO_CHECK = ['Książki']
+VALUES_LDR67_TO_CHECK = ['am']

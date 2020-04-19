@@ -1,71 +1,21 @@
-from __future__ import annotations
+class RawRecordMatchData(object):
+    __slots__ = ['raw_record_id',
+                 'main_creator', 'other_creator',
+                 'titles']
 
-from typing import List
-from uuid import uuid4
-from hashlib import sha1
+    def __init__(self, raw_record_id):
+        self.raw_record_id = raw_record_id
 
-from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.validators import is_number_of_1xx_fields_valid, is_field_245_valid
-from commons.normalization import prepare_name_for_indexing, normalize_title
-
-from objects.expression import FRBRExpression
-from objects.manifestation import FRBRManifestation
-from objects.helper_objects import ObjCounter
-
-
-class FRBRCluster(object):
-    """
-    FRBRCluster class represents...
-    """
-    __slots__ = ['uuid',
-                 'main_creator', 'other_creator', 'titles',
-                 'work_match_data_sha_1',
-                 'expression_distinctive_tuple_from_original_raw_record',
-                 'expression_match_data_sha_1',
-                 'manifestation_from_original_raw_record', 'original_raw_record_id',
-                 'expressions', 'manifestations',
-                 'raw_record_match_data_by_raw_record_id',
-                 'expressions_by_distinctive_tuple', 'manifestations_by_raw_record_id',
-                 'stub']
-
-    def __init__(self):
-        self.uuid = str(uuid4())
-
-        # data for frbrization process
-        # work matching
-        self.main_creator = {}
-        self.other_creator = {}
-        self.titles = {}
-
-        self.work_match_data_sha_1 = None
-
-        # expression matching
-        self.expression_distinctive_tuple_from_original_raw_record = None
-
-        self.expression_match_data_sha_1 = None
-        # manifestation creation
-        self.manifestation_from_original_raw_record = None
-
-        self.original_raw_record_id = None
-
-        # children
-        self.expressions = {}
-        self.manifestations = {}
-
-        # raw_record_match_data
-        self.raw_record_match_data_by_raw_record_id = {}
-
-        # helper attributes
-        self.expressions_by_distinctive_tuple = {}
-        self.manifestations_by_raw_record_id = {}
-        self.stub = True
+        # data for creating, merging, splitting and deleting frbr_cluster_match_data
+        self.main_creator = set()
+        self.other_creator = set()
+        self.titles = set()
 
     def __repr__(self):
-        # creator = first most frequent main_creator or first other_creator
-        # title = first most frequent title
-        return f'Work(id={self.uuid}, ' \
-               f'main_creator={self.main_creator if self.main_creator else self.other_creator}, ' \
-               f'title={list(self.titles.keys())[0]})'
+        return f'RawRecordMatchData(raw_record_id={self.raw_record_id}, ' \
+               f'main_creator={self.main_creator}, ' \
+               f'other_creator={self.other_creator}, ' \
+               f'title={self.titles})'
 
     # 3.1.1
     def get_main_creator(self, bib_object):
@@ -81,11 +31,11 @@ class FRBRCluster(object):
         # 3.1.1.1 - there is 1XX field
         if list_val_100abcd or list_val_110abcdn or list_val_111abcdn:
             if list_val_100abcd:
-                self.main_creator.setdefault(prepare_name_for_indexing(list_val_100abcd[0]), ObjCounter()).add(1)
+                self.main_creator.add(prepare_name_for_indexing(list_val_100abcd[0]))
             if list_val_110abcdn:
-                self.main_creator.setdefault(prepare_name_for_indexing(list_val_110abcdn[0]), ObjCounter()).add(1)
+                self.main_creator.add(prepare_name_for_indexing(list_val_110abcdn[0]))
             if list_val_111abcdn:
-                self.main_creator.setdefault(prepare_name_for_indexing(list_val_111abcdn[0]), ObjCounter()).add(1)
+                self.main_creator.add(prepare_name_for_indexing(list_val_111abcdn[0]))
 
         # 3.1.1.2 - if there is no 1XX field, check for 7XX [CHECKED]
         else:
@@ -140,7 +90,7 @@ class FRBRCluster(object):
             main_creators_to_add.update(postprocess(prepare_name_for_indexing, list_val_711abcdn))
 
             for main_creator in main_creators_to_add:
-                self.main_creator.setdefault(main_creator, ObjCounter()).add(1)
+                self.main_creator.add(main_creator)
 
     # 3.1.2
     def get_other_creator(self, bib_object):
@@ -148,8 +98,6 @@ class FRBRCluster(object):
             list_val_700abcd = set()
             list_val_710abcdn = set()
             list_val_711abcdn = set()
-
-            other_creators_to_add = set()
 
             list_700_fields = bib_object.get_fields('700')
             if list_700_fields:
@@ -161,7 +109,7 @@ class FRBRCluster(object):
                             list_val_700abcd.add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
 
-            other_creators_to_add.update(postprocess(prepare_name_for_indexing, list_val_700abcd))
+            self.other_creator.update(postprocess(prepare_name_for_indexing, list_val_700abcd))
 
             list_710_fields = bib_object.get_fields('710')
             if list_710_fields:
@@ -173,7 +121,7 @@ class FRBRCluster(object):
                             list_val_710abcdn.add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
-            other_creators_to_add.update(postprocess(prepare_name_for_indexing, list_val_710abcdn))
+            self.other_creator.update(postprocess(prepare_name_for_indexing, list_val_710abcdn))
 
             list_711_fields = bib_object.get_fields('711')
             if list_711_fields:
@@ -185,10 +133,7 @@ class FRBRCluster(object):
                             list_val_711abcdn.add(
                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
 
-            other_creators_to_add.update(postprocess(prepare_name_for_indexing, list_val_711abcdn))
-
-            for other_creator in other_creators_to_add:
-                self.main_creator.setdefault(other_creator, ObjCounter()).add(1)
+            self.other_creator.update(postprocess(prepare_name_for_indexing, list_val_711abcdn))
 
     # 3.1.3
     # to be able to track changes on merging, splitting and deleting FRBR clusters,
@@ -236,10 +181,8 @@ class FRBRCluster(object):
             titles_to_add.add(to_add)
 
         # get titles from 246 fields
-        list_fields_246ab = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
-                                                                                          ('246', ['a', 'b'])))
-        for title in list_fields_246ab:
-            titles_to_add.add(prepare_name_for_indexing(title))
+        list_fields_246ab = postprocess(normalize_title, get_values_by_field_and_subfield('246', ['a', 'b']))
+        titles_to_add.update(list_fields_246ab)
 
         # get title from 240 field
         title_240_raw_list = bib_object.get_fields('240')
@@ -284,58 +227,30 @@ class FRBRCluster(object):
             # TODO get expressions when there is more than one work in raw record
             pass
 
-    def get_sha_1_of_work_match_data(self):
-        work_match_data_byte_array = bytearray()
-        work_match_data_byte_array.extend(repr(sorted(self.main_creator.keys())).encode('utf-8'))
-        work_match_data_byte_array.extend(repr(sorted(self.other_creator.keys())).encode('utf-8'))
-        work_match_data_byte_array.extend(repr(sorted(self.titles.keys())).encode('utf-8'))
-
-        self.work_match_data_sha_1 = sha1(work_match_data_byte_array).hexdigest()
-
-    def get_sha_1_of_expression_match_data(self):
-        expression_match_data_byte_array = bytearray()
-        expression_match_data_byte_array.extend(
-            repr(self.expression_distinctive_tuple_from_original_raw_record).encode('utf-8'))
-
-        self.expression_match_data_sha_1 = sha1(expression_match_data_byte_array).hexdigest()
-
-    def get_sha_1_of_manifestation_match_data(self):
-        pass
-
-    def check_changes_in_match_data(self, frbr_cluster_match_info):
-        pass
-
     def get_raw_record_id(self, bib_object):
         self.original_raw_record_id = bib_object.get_fields('001')[0].value()
 
     def create_manifestation(self):
-        self.manifestation_from_original_raw_record = FRBRManifestation(self.original_raw_record_id)
+        self.manifestation_from_original_raw_record = FRBRManifestation()
 
-    def create_expression_and_add_manifestation(self):
-        expression_to_add = FRBRExpression(self.expression_distinctive_tuple_from_original_raw_record,
-                                           self.expression_match_data_sha_1)
+    def create_expression_and_append_manifestation(self):
+        expression_to_add = FRBRExpression(self.expression_distinctive_tuple_from_original_raw_record)
 
         self.expressions_by_distinctive_tuple.setdefault(self.expression_distinctive_tuple_from_original_raw_record,
                                                          expression_to_add.uuid)
         self.expressions.setdefault(expression_to_add.uuid,
                                     expression_to_add).manifestations.setdefault(self.manifestation_from_original_raw_record.uuid,
-                                                                                 self.manifestation_from_original_raw_record.raw_record_id)
+                                                                                 self.manifestation_from_original_raw_record)
 
     def merge_frbr_clusters_and_reindex(self,
-                                        matched_clusters_to_merge_with: List[FRBRCluster],
+                                        matched_frbr_cluster: List[FRBRCluster],
                                         indexed_frbr_clusters_by_uuid: dict,
                                         indexed_frbr_clusters_by_titles: dict,
                                         indexed_frbr_clusters_by_raw_record_id: dict) -> None:
 
-        matched_frbr_cluster = matched_clusters_to_merge_with[0]
-
         # perform these actions only if merging stub with existing frbr_cluster
         # in this case stub is never indexed and dies after merging
         if self.stub:
-            print(self.uuid)
-            print('Merging stub with existing.')
-            print(matched_frbr_cluster)
-            print(matched_clusters_to_merge_with)
             self.merge_titles(matched_frbr_cluster)
             self.merge_manifestations_by_original_raw_id(matched_frbr_cluster)
             self.merge_children(matched_frbr_cluster,
@@ -343,40 +258,19 @@ class FRBRCluster(object):
                                 indexed_frbr_clusters_by_titles,
                                 indexed_frbr_clusters_by_raw_record_id)
             matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
-            matched_frbr_cluster.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
-            if len(matched_clusters_to_merge_with) > 1:
-                print('Going down...')
-                matched_frbr_cluster.merge_frbr_clusters_and_reindex(matched_clusters_to_merge_with[1:],
-                                                                     indexed_frbr_clusters_by_uuid,
-                                                                     indexed_frbr_clusters_by_titles,
-                                                                     indexed_frbr_clusters_by_raw_record_id)
 
         # perform these actions only if merging two or more existing frbr_clusters
-        # in this case all matched frbr_clusters will be merged with last frbr_cluster on the list
+        # in this case all matched frbr_clusters will be merged with first frbr_cluster on the list
         # and will die after that (they will be unindexed and deleted from the main index)
         else:
-            print(self.uuid)
-            print('Merging existing with existing.')
-            print(matched_frbr_cluster)
-            print(matched_clusters_to_merge_with)
             self.unindex_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
             self.merge_titles(matched_frbr_cluster)
-            self.merge_manifestations_by_original_raw_id(matched_frbr_cluster)
             self.merge_children(matched_frbr_cluster,
                                 indexed_frbr_clusters_by_uuid,
                                 indexed_frbr_clusters_by_titles,
                                 indexed_frbr_clusters_by_raw_record_id)
 
-            matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
-            matched_frbr_cluster.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
-
             indexed_frbr_clusters_by_uuid.pop(self.uuid)
-
-            if len(matched_clusters_to_merge_with) > 1:
-                matched_frbr_cluster.merge_frbr_clusters_and_reindex(matched_clusters_to_merge_with[1:],
-                                                                     indexed_frbr_clusters_by_uuid,
-                                                                     indexed_frbr_clusters_by_titles,
-                                                                     indexed_frbr_clusters_by_raw_record_id)
 
     def merge_titles(self, matched_frbr_cluster: FRBRCluster) -> None:
         for title, counter in self.titles.items():
@@ -392,25 +286,24 @@ class FRBRCluster(object):
                        indexed_frbr_clusters_by_raw_record_id: dict) -> None:
 
         # merge strategy for merging two already existing frbr_clusters
-        if not self.stub:
-            if self.expressions_by_distinctive_tuple:
-                for expression_distinctive_tuple, expression_uuid in self.expressions_by_distinctive_tuple.items():
-                    expression_to_merge_with_uuid = matched_frbr_cluster.expressions_by_distinctive_tuple.get(
-                        expression_distinctive_tuple)
+        if self.expressions_by_distinctive_tuple:
+            for expression_distinctive_tuple, expression_uuid in self.expressions_by_distinctive_tuple.items():
+                expression_to_merge_with_uuid = matched_frbr_cluster.expressions_by_distinctive_tuple.get(
+                    expression_distinctive_tuple)
 
-                    if expression_to_merge_with_uuid:
-                        expression_to_merge_with_object = matched_frbr_cluster.expressions.get(
-                            expression_to_merge_with_uuid)
-                        for manifestation_uuid, manifestation in self.expressions.get(
-                                expression_uuid).manifestations.items():
-                            expression_to_merge_with_object.manifestations.setdefault(
-                                manifestation_uuid,
-                                manifestation)
-                    else:
-                        matched_frbr_cluster.expressions_by_distinctive_tuple.update(
-                            {expression_distinctive_tuple: expression_uuid})
-                        matched_frbr_cluster.expressions.update(
-                            {expression_uuid: self.expressions.get(expression_uuid)})
+                if expression_to_merge_with_uuid:
+                    expression_to_merge_with_object = matched_frbr_cluster.expressions.get(
+                        expression_to_merge_with_uuid)
+                    for manifestation_uuid, manifestation in self.expressions.get(
+                            expression_uuid).manifestations.items():
+                        expression_to_merge_with_object.manifestations.setdefault(
+                            manifestation_uuid,
+                            manifestation)
+                else:
+                    matched_frbr_cluster.expressions_by_distinctive_tuple.update(
+                        {expression_distinctive_tuple: expression_uuid})
+                    matched_frbr_cluster.expressions.update(
+                        {expression_uuid: self.expressions.get(expression_uuid)})
 
         # merge strategy for merging stub frbr_cluster with existing frbr_cluster
         else:
@@ -421,37 +314,35 @@ class FRBRCluster(object):
                     expression_to_merge_with_uuid)
                 expression_to_merge_with_object.manifestations.setdefault(
                     self.manifestation_from_original_raw_record.uuid,
-                    self.manifestation_from_original_raw_record.raw_record_id)
+                    self.manifestation_from_original_raw_record)
             else:
-                self.create_expression_and_add_manifestation()
+                self.create_expression_and_append_manifestation()
                 matched_frbr_cluster.expressions_by_distinctive_tuple.update(self.expressions_by_distinctive_tuple)
                 matched_frbr_cluster.expressions.update(self.expressions)
+
+            # matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
+            # matched_frbr_cluster.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
 
     # index entire cluster by titles
     # to avoid unnecessary requests (in case of merging) only new (with counter.count == 1) titles are indexed
     # in production dict is replaced by Redis
     def index_frbr_cluster_by_titles(self, indexed_frbr_clusters_by_titles: dict) -> None:
         for title, counter in self.titles.items():
-            if counter.diff > 0:
+            if counter.count == 1:
                 indexed_frbr_clusters_by_titles.setdefault(title, set()).add(self.uuid)
 
     def unindex_frbr_cluster_by_titles(self, indexed_frbr_clusters_by_titles: dict):
         for title in self.titles.keys():
-            uuids_by_title = indexed_frbr_clusters_by_titles.get(title)
-            uuids_by_title.discard(self.uuid)
+            indexed_frbr_clusters_by_titles.get(title).pop(self.uuid)
 
     def index_frbr_cluster_by_uuid(self, indexed_frbr_clusters_by_uuid):
         indexed_frbr_clusters_by_uuid.setdefault(self.uuid, self)
 
     def index_frbr_cluster_by_raw_record_ids(self, indexed_frbr_clusters_by_raw_record_id: dict) -> None:
-        for expression_uuid, expression in self.expressions.items():
-            for manifestation_uuid, manifestation_raw_record_id in expression.manifestations.items():
-                dict_to_index = {'work_match_data': {self.work_match_data_sha_1: self.uuid},
-                                 'expression_match_data': {expression.expression_match_data_sha_1: expression_uuid},
-                                 'manifestation_match_data': None}
-
-                indexed_frbr_clusters_by_raw_record_id.setdefault(manifestation_raw_record_id,
-                                                              {}).update(dict_to_index)
+        for original_raw_record_id in self.manifestations_by_raw_record_id.keys():
+            indexed_frbr_clusters_by_raw_record_id.setdefault(original_raw_record_id,
+                                                              {}).setdefault('current_matches',
+                                                                             set()).add(self.uuid)
 
     def set_manifestation_by_raw_record_id_based_on_original_raw_record(self):
         self.manifestations_by_raw_record_id.setdefault(self.original_raw_record_id,
@@ -474,10 +365,10 @@ class FRBRCluster(object):
             candidate_cluster = indexed_frbr_clusters_by_uuid.get(candidate_uuid)
             if candidate_cluster:
                 if candidate_cluster.main_creator:
-                    if candidate_cluster.main_creator.keys() == self.main_creator.keys():
+                    if candidate_cluster.main_creator == self.main_creator:
                         matched_clusters.add(candidate_uuid)
                 if candidate_cluster.other_creator:
-                    if candidate_cluster.other_creator.keys() == self.other_creator.keys():
+                    if candidate_cluster.other_creator == self.other_creator:
                         matched_clusters.add(candidate_uuid)
                 if not candidate_cluster.main_creator and not candidate_cluster.other_creator \
                         and not self.main_creator and not self.other_creator:
@@ -485,22 +376,18 @@ class FRBRCluster(object):
 
         matched_clusters = list(matched_clusters)
 
-        # no matches for this FRBRCluster stub
         if not matched_clusters:
             self.create_manifestation()
             self.set_manifestation_by_raw_record_id_based_on_original_raw_record()
-            self.create_expression_and_add_manifestation()
+            self.create_expression_and_append_manifestation()
             self.stub = False
 
-            self.index_frbr_cluster_by_uuid(indexed_frbr_clusters_by_uuid)
             self.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
+            self.index_frbr_cluster_by_uuid(indexed_frbr_clusters_by_uuid)
+
             self.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
-            print("Creating new!")
 
-        # there are one or more matches for this FRBRCluster stub
         else:
-            print(f"Matching! - matched clusters = {len(matched_clusters)}. - {matched_clusters}")
-
             self.create_manifestation()
             self.set_manifestation_by_raw_record_id_based_on_original_raw_record()
 
@@ -511,4 +398,3 @@ class FRBRCluster(object):
                                                  indexed_frbr_clusters_by_uuid,
                                                  indexed_frbr_clusters_by_titles,
                                                  indexed_frbr_clusters_by_raw_record_id)
-

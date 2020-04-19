@@ -15,13 +15,14 @@ import config.mock_es_id_prefixes as esid
 
 
 class FRBRManifestation(object):
-    __slots__ = ['uuid']
+    __slots__ = ['uuid', 'raw_record_id']
 
-    def __init__(self):
-        self.uuid = uuid4()
+    def __init__(self, raw_record_id):
+        self.uuid = str(uuid4())
+        self.raw_record_id = raw_record_id
 
     def __repr__(self):
-        return f'Manifestation(id={self.uuid})'
+        return f'Manifestation(id={self.uuid}, raw_record_id={self.raw_record_id})'
 
 
 

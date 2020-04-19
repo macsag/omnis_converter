@@ -13,12 +13,13 @@ import config.mock_es_id_prefixes as esid
 
 
 class FRBRExpression(object):
-    __slots__ = ['uuid', 'manifestations', 'expression_distinctive_tuple']
+    __slots__ = ['uuid', 'manifestations', 'expression_distinctive_tuple', 'expression_match_data_sha_1']
 
-    def __init__(self, expression_distinctive_tuple):
-        self.uuid = uuid4()
+    def __init__(self, expression_distinctive_tuple, expression_match_data_sha_1):
+        self.uuid = str(uuid4())
         self.manifestations = {}
         self.expression_distinctive_tuple = expression_distinctive_tuple
+        self.expression_match_data_sha_1 = expression_match_data_sha_1
 
     def __repr__(self):
         return f'Expression(id={self.uuid}, expression_distinctive_tuple={self.expression_distinctive_tuple})'
