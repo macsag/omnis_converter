@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pickle
 from typing import List
 from uuid import uuid4
 from hashlib import sha1
+
+import redis
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
 from commons.validators import is_number_of_1xx_fields_valid, is_field_245_valid
@@ -430,10 +433,14 @@ class FRBRCluster(object):
     # index entire cluster by titles
     # to avoid unnecessary requests (in case of merging) only new (with counter.count == 1) titles are indexed
     # in production dict is replaced by Redis
-    def index_frbr_cluster_by_titles(self, indexed_frbr_clusters_by_titles: dict) -> None:
+    def index_frbr_cluster_by_titles(self, indexed_frbr_clusters_by_titles: redis.Redis) -> None:
+        p = indexed_frbr_clusters_by_titles.pipeline(transaction=False)
+
         for title, counter in self.titles.items():
             if counter.diff > 0:
-                indexed_frbr_clusters_by_titles.setdefault(title, set()).add(self.uuid)
+                p.sadd(title, self.uuid)
+
+        p.execute()
 
     def unindex_frbr_cluster_by_titles(self, indexed_frbr_clusters_by_titles: dict):
         for title in self.titles.keys():
@@ -441,7 +448,7 @@ class FRBRCluster(object):
             uuids_by_title.discard(self.uuid)
 
     def index_frbr_cluster_by_uuid(self, indexed_frbr_clusters_by_uuid):
-        indexed_frbr_clusters_by_uuid.setdefault(self.uuid, self)
+        indexed_frbr_clusters_by_uuid.set(self.uuid, pickle.dumps(self))
 
     def index_frbr_cluster_by_raw_record_ids(self, indexed_frbr_clusters_by_raw_record_id: dict) -> None:
         for expression_uuid, expression in self.expressions.items():
@@ -458,30 +465,32 @@ class FRBRCluster(object):
                                                         self.manifestation_from_original_raw_record.uuid)
 
     def match_work_and_index(self,
-                             indexed_frbr_clusters_by_uuid: dict,
-                             indexed_frbr_clusters_by_titles: dict,
-                             indexed_frbr_clusters_by_raw_record_id: dict) -> None:
+                             indexed_frbr_clusters_by_uuid: redis.Redis,
+                             indexed_frbr_clusters_by_titles: redis.Redis,
+                             indexed_frbr_clusters_by_raw_record_id: redis.Redis) -> None:
 
-        candidate_clusters = set()
+        candidate_clusters_uuids = set()
         matched_clusters = set()
 
-        for title in self.titles.keys():
-            candidates_per_title = indexed_frbr_clusters_by_titles.get(title)
-            if candidates_per_title:
-                candidate_clusters.update(candidates_per_title)
+        candidates_per_title = indexed_frbr_clusters_by_titles.mget(self.titles.keys())
+        for candidate in candidates_per_title:
+            if candidate:
+                candidate_clusters_uuids.add(pickle.loads(candidate))
 
-        for candidate_uuid in candidate_clusters:
-            candidate_cluster = indexed_frbr_clusters_by_uuid.get(candidate_uuid)
-            if candidate_cluster:
-                if candidate_cluster.main_creator:
-                    if candidate_cluster.main_creator.keys() == self.main_creator.keys():
-                        matched_clusters.add(candidate_uuid)
-                if candidate_cluster.other_creator:
-                    if candidate_cluster.other_creator.keys() == self.other_creator.keys():
-                        matched_clusters.add(candidate_uuid)
-                if not candidate_cluster.main_creator and not candidate_cluster.other_creator \
+        candidate_clusters_objects = indexed_frbr_clusters_by_uuid.mget(list(candidate_clusters_uuids))
+
+        for candidate in candidate_clusters_objects:
+            if candidate:
+                unpickled_candidate = pickle.loads(candidate)
+                if unpickled_candidate.main_creator:
+                    if unpickled_candidate.main_creator.keys() == self.main_creator.keys():
+                        matched_clusters.add(unpickled_candidate)
+                if unpickled_candidate.other_creator:
+                    if unpickled_candidate.other_creator.keys() == self.other_creator.keys():
+                        matched_clusters.add(unpickled_candidate)
+                if not unpickled_candidate.main_creator and not unpickled_candidate.other_creator \
                         and not self.main_creator and not self.other_creator:
-                    matched_clusters.add(candidate_uuid)
+                    matched_clusters.add(unpickled_candidate)
 
         matched_clusters = list(matched_clusters)
 
@@ -494,7 +503,7 @@ class FRBRCluster(object):
 
             self.index_frbr_cluster_by_uuid(indexed_frbr_clusters_by_uuid)
             self.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
-            self.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
+            #self.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
             print("Creating new!")
 
         # there are one or more matches for this FRBRCluster stub

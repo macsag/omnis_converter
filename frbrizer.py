@@ -99,15 +99,15 @@ def main_loop(configuration: dict):
                 # pass record and related frbr_clusters directly to converter
                 # (other data still may have been changed)
 
-                frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
-                    frbr_cluster.original_raw_record_id)
+                #frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
+                    #frbr_cluster.original_raw_record_id)
 
-                if frbr_cluster_match_info:
-                    frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
+                #if frbr_cluster_match_info:
+                    #frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
 
-                frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
-                                                  indexed_frbr_clusters_by_titles,
-                                                  indexed_frbr_clusters_by_raw_record_id)
+                frbr_cluster.match_work_and_index(FRBRCLUSTERS_BY_UUID,
+                                                  FRBRCLUSTERS_BY_TITLE,
+                                                  FRBRCLUSTERS_BY_RAW_RECORD_ID)
 
 
 
@@ -301,14 +301,14 @@ if __name__ == '__main__':
     logging.root.addHandler(logging.StreamHandler(sys.stdout))
     logging.root.setLevel(level=logging.DEBUG)
 
-    r_client_frbr_clusters_by_uuid = redis.Redis(db=0)
-    r_client_frbr_cluster_by_title = redis.Redis(db=1)
-    r_client_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
+    FRBRCLUSTERS_BY_UUID = redis.Redis(db=0)
+    FRBRCLUSTERS_BY_TITLE = redis.Redis(db=1)
+    FRBRCLUSTERS_BY_RAW_RECORD_ID = redis.Redis(db=2)
 
     buff = JsonBufferOut('./output/item.json', './output/materialization.json', './output/expression.json',
                          './output/work.json', './output/expression_data.json', './output/work_data.json')
 
-    configs = {'bn_file_in': './input_files/bib_records/bn/bibs-ksiazka.marc',
+    configs = {'bn_file_in': './input_files/bib_records/bn/quo_vadis.mrc',
                'mak_files_in': './input_files/bib_records/mak',
                'inst_file_in': './input_files/institutions/manager-library.json',
                'code_val_file_in': './input_files/code_values/001_import.sql',
