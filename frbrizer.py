@@ -9,7 +9,7 @@ from pymarc import parse_xml_to_array
 
 from analyzer import analyze_record_and_produce_frbr_clusters
 
-import exceptions.exceptions as oe
+
 import commons.validators as c_valid
 
 from objects.frbr_cluster import FRBRCluster
@@ -24,7 +24,7 @@ from indexers.descriptors_indexer import index_descriptors
 from indexers.code_value_indexer import code_value_indexer
 from indexers.inst_indexer import create_lib_indexes
 
-from manifestation_matcher.manif_matcher import get_titles_for_manifestation_matching, match_manifestation
+from manifestation_matcher.manif_matcher import get_titles_for_manifestation_matching, match_manifestation, get_data_for_matching
 
 from descriptor_resolver.resolve_record import resolve_record
 
@@ -85,10 +85,9 @@ def main_loop(configuration: dict):
             # analyze bib record
             # and create one or more FRBRCluster instances (one if single work bib, two or more if multiwork bib)
             # and get from raw parsed record data needed for matching each or them
+            # and for building final works, expressions and manifestations (work_data, expression_data, etc.)
             frbr_clusters_list = analyze_record_and_produce_frbr_clusters(bib)
 
-            # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
-            # or create and index new frbr_cluster
             for frbr_cluster in frbr_clusters_list:
                 # has the raw record been already matched?
                 # has data needed for matching produced clusters changed?
@@ -105,9 +104,15 @@ def main_loop(configuration: dict):
                 if frbr_cluster_match_info:
                     frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
 
+                # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
+                # or create and index new frbr_cluster
                 frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
                                                   indexed_frbr_clusters_by_titles,
-                                                  indexed_frbr_clusters_by_raw_record_id)
+                                                  indexed_frbr_clusters_by_raw_record_id,
+                                                  bib)
+
+                # send clusters to final conversion
+                # TODO
 
 
 
@@ -301,14 +306,14 @@ if __name__ == '__main__':
     logging.root.addHandler(logging.StreamHandler(sys.stdout))
     logging.root.setLevel(level=logging.DEBUG)
 
-    r_client_frbr_clusters_by_uuid = redis.Redis(db=0)
-    r_client_frbr_cluster_by_title = redis.Redis(db=1)
-    r_client_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
+    #r_client_frbr_clusters_by_uuid = redis.Redis(db=0)
+    #r_client_frbr_cluster_by_title = redis.Redis(db=1)
+    #r_client_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
 
     buff = JsonBufferOut('./output/item.json', './output/materialization.json', './output/expression.json',
                          './output/work.json', './output/expression_data.json', './output/work_data.json')
 
-    configs = {'bn_file_in': './input_files/bib_records/bn/bibs-ksiazka.marc',
+    configs = {'bn_file_in': './input_files/bib_records/bn/quo_vadis.mrc',
                'mak_files_in': './input_files/bib_records/mak',
                'inst_file_in': './input_files/institutions/manager-library.json',
                'code_val_file_in': './input_files/code_values/001_import.sql',

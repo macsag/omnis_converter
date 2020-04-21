@@ -77,6 +77,8 @@ def normalize_title_for_frbr_indexing(title: str):
 def to_single_value(list_of_values):
     if list_of_values:
         return list_of_values[0]
+    else:
+        return ''
 
 
 def normalize_publisher(val):

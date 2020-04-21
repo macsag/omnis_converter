@@ -3,7 +3,7 @@ import re
 from commons.marc_iso_commons import get_values_by_field, get_values_by_field_and_subfield, read_marc_from_binary
 from commons.marc_iso_commons import normalize_edition_for_matching, postprocess
 
-from objects.helper_objects import ManifMatchData
+from objects.helper_objects import ManifestationMatchData
 
 
 def get_data_for_matching(manifestation):
@@ -23,7 +23,7 @@ def get_data_for_matching(manifestation):
     b_format = int(re.search('\d+', get_values_by_field_and_subfield(manifestation, ('300', ['c']))[0])[0])
     edition = postprocess(normalize_edition_for_matching, get_values_by_field(manifestation, '250'))
 
-    return ManifMatchData(ldr_67=ldr_67, val_008_0614=val_008_0614, isbn_020_az=isbn_020_az, title_245=title_245,
+    return ManifestationMatchData(ldr_67=ldr_67, val_008_0614=val_008_0614, isbn_020_az=isbn_020_az, title_245=title_245,
                           title_245_no_offset=title_245_no_offset, title_245_with_offset=title_245_with_offset,
                           titles_490=titles_490, numbers_from_title_245=numbers_from_title_245,
                           place_pub_260_a_first_word=place_pub_260_a_first_word, num_of_pages_300_a=num_of_pages_300_a,

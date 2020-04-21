@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from pymarc import Record
 
+import exceptions.exceptions as oe
 import commons.validators as c_valid
 from objects.frbr_cluster import FRBRCluster
 
@@ -43,7 +44,6 @@ def produce_frbr_cluster_from_single_work(pymarc_object: Record) -> Optional[FRB
 
     frbr_cluster.get_sha_1_of_work_match_data()
     frbr_cluster.get_sha_1_of_expression_match_data()
-    frbr_cluster.get_sha_1_of_manifestation_match_data()
-
+    frbr_cluster.get_work_data_from_single_work_record(pymarc_object)
 
     return frbr_cluster

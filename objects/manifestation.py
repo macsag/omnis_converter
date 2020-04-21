@@ -1,4 +1,5 @@
 from uuid import uuid4
+from hashlib import sha1
 import json
 
 from commons.marc_iso_commons import to_single_value, get_values_by_field_and_subfield, get_values_by_field
@@ -8,6 +9,7 @@ from commons.marc_iso_commons import serialize_to_jsonl_descr
 from commons.json_writer import write_to_json
 
 from descriptor_resolver.resolve_record import resolve_field_value, resolve_code_and_serialize, only_values
+from manifestation_matcher.manif_matcher import get_data_for_matching
 
 from objects.item import BnItem, PolonaItem
 
@@ -15,15 +17,53 @@ import config.mock_es_id_prefixes as esid
 
 
 class FRBRManifestation(object):
-    __slots__ = ['uuid', 'raw_record_id']
+    __slots__ = ['uuid', 'raw_record_id', 'manifestation_match_data', 'manifestation_match_data_sha_1',
+                 'mat_nlp_id', 'mat_external_id', 'mat_isbn', 'mat_carrier_type', 'mat_media_type',
+                 'mat_number_of_pages', 'mat_physical_info', 'mat_pub_city', 'mat_nat_bib', 'mat_edition',
+                 'mat_contributor']
 
-    def __init__(self, raw_record_id):
+    def __init__(self, raw_record_id, bib_object):
         self.uuid = str(uuid4())
         self.raw_record_id = raw_record_id
+
+        # manifestation_match_data
+        self.manifestation_match_data = get_data_for_matching(bib_object)
+        self.manifestation_match_data_sha_1 = self.get_sha_1_of_manifestation_match_data()
+
+        # manifestation attributes
+        self.mat_nlp_id = to_single_value(get_values_by_field(bib_object, '001'))
+        self.mat_external_id = get_values_by_field_and_subfield(bib_object, ('035', ['a']))
+        self.mat_isbn = get_values_by_field_and_subfield(bib_object, ('020', ['a']))
+        self.mat_carrier_type = get_values_by_field_and_subfield(bib_object, ('338', ['b']))
+        self.mat_media_type = get_values_by_field_and_subfield(bib_object, ('337', ['b']))
+        self.mat_number_of_pages = to_single_value(get_values_by_field_and_subfield(bib_object, ('300', ['a'])))
+        self.mat_physical_info = get_values_by_field(bib_object, '300')
+        self.mat_pub_city = get_values_by_field_and_subfield(bib_object, ('260', ['a']))
+
+        self.mat_contributor = []
+        self.mat_nat_bib = []  # todo
+        self.mat_edition = get_values_by_field(bib_object, '250')
 
     def __repr__(self):
         return f'Manifestation(id={self.uuid}, raw_record_id={self.raw_record_id})'
 
+    def get_sha_1_of_manifestation_match_data(self):
+        manifestation_match_data_byte_array = bytearray()
+        mmd = self.manifestation_match_data
+        manifestation_match_data_byte_array.extend(mmd.ldr_67.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(mmd.val_008_0614.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(repr(sorted(mmd.isbn_020_az)).encode('utf-8'))
+        manifestation_match_data_byte_array.extend(mmd.title_245.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(mmd.title_245_no_offset.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(mmd.title_245_with_offset.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(repr(sorted(mmd.titles_490)).encode('utf-8'))
+        manifestation_match_data_byte_array.extend(mmd.numbers_from_title_245.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(mmd.place_pub_260_a_first_word.encode('utf-8'))
+        manifestation_match_data_byte_array.extend(str(mmd.num_of_pages_300_a).encode('utf-8'))
+        manifestation_match_data_byte_array.extend(str(mmd.b_format).encode('utf-8'))
+        manifestation_match_data_byte_array.extend(repr(sorted(mmd.edition)).encode('utf-8'))
+
+        return sha1(manifestation_match_data_byte_array).hexdigest()
 
 
 class Manifestation(object):
