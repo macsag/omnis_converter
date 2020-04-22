@@ -28,6 +28,8 @@ from manifestation_matcher.manif_matcher import get_titles_for_manifestation_mat
 
 from descriptor_resolver.resolve_record import resolve_record
 
+import config.main_configuration as c_mc
+
 
 def has_items(pymarc_object):
     return True if get_values_by_field(pymarc_object, '852') else False
@@ -49,7 +51,7 @@ def main_loop(configuration: dict):
     # 'previous_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...)}}
     indexed_frbr_clusters_by_raw_record_id = {}
 
-    indexed_manifestations_bn_by_nlp_id = {}
+    indexed_manifestations_by_raw_record_id = {}
     indexed_manifestations_bn_by_titles_245 = {}
     indexed_manifestations_bn_by_titles_490 = {}
 
@@ -73,20 +75,20 @@ def main_loop(configuration: dict):
     # used for limit and stats
     counter = 0
 
-    for bib in tqdm(read_marc_from_file(configuration['bn_file_in'])):
-        if c_valid.is_document_type(bib) and \
-                c_valid.is_single_or_multi_work(bib) == 'single_work' and \
-                has_items(bib) and \
-                is_245_indicator_2_valid(bib):
+    for pymarc_object in tqdm(read_marc_from_file(configuration['bn_file_in'])):
+        if c_valid.is_document_type(pymarc_object) and \
+                c_valid.is_single_or_multi_work(pymarc_object) == 'single_work' and \
+                has_items(pymarc_object) and \
+                is_245_indicator_2_valid(pymarc_object):
 
             if counter > configuration['limit']:
                 break
 
-            # analyze bib record
-            # and create one or more FRBRCluster instances (one if single work bib, two or more if multiwork bib)
+            # analyze bibliographic record
+            # and create one or more FRBRCluster instances (one if single work bib, two or more if multi work bib)
             # and get from raw parsed record data needed for matching each or them
             # and for building final works, expressions and manifestations (work_data, expression_data, etc.)
-            frbr_clusters_list = analyze_record_and_produce_frbr_clusters(bib)
+            frbr_clusters_list = analyze_record_and_produce_frbr_clusters(pymarc_object)
 
             for frbr_cluster in frbr_clusters_list:
                 # has the raw record been already matched?
@@ -98,21 +100,73 @@ def main_loop(configuration: dict):
                 # pass record and related frbr_clusters directly to converter
                 # (other data still may have been changed)
 
-                frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
-                    frbr_cluster.original_raw_record_id)
+                # get match_info
 
+                # local dict version
+                if type(indexed_frbr_clusters_by_raw_record_id) == dict:
+                    frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
+                        frbr_cluster.original_raw_record_id)
+                # Redis version
+                else:
+                    frbr_cluster_match_info = pickle.loads(indexed_frbr_clusters_by_raw_record_id.get(
+                        frbr_cluster.original_raw_record_id))
+
+
+                # if record was already indexed, compare match_data
                 if frbr_cluster_match_info:
-                    frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
+                    changes = frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
+
+                    # if nothing changed, rebuild work_data, expression_data and manifestation
+                    # using uuids from frbr_cluster_match_info to get frbr_cluster from database
+                    # and raw_record_id to get manifestation and data from frbr_cluster
+                    if not changes:
+                        frbr_cluster_to_rebuild_uuid = frbr_cluster_match_info.get(frbr_cluster.work_match_data_sha_1)
+                        new_work_data = frbr_cluster.work_data_by_raw_record_id.get(frbr_cluster.original_raw_record_id)
+                        new_expression_data = None # TODO
+
+                        # local dict version
+                        if type(indexed_frbr_clusters_by_uuid) == dict:
+
+                            # get cluster from local dict
+                            frbr_cluster_to_rebuild = indexed_frbr_clusters_by_uuid.get(frbr_cluster_to_rebuild_uuid)
+                            # rebuild work_data and expression_data
+                            frbr_cluster_to_rebuild.rebuild_work_and_expression_data(new_work_data,
+                                                                                     new_expression_data)
+
+                            # rebuild manifestation (data for manifestation comes from newly created frbr_cluster,
+                            # but manifestation uuid must not change, so we create manifestation and replace new uuid
+                            # with old uuid from match_info)
+                            new_manifestation = frbr_cluster.create_manifestation(pymarc_object)
+                            new_manifestation.uuid = frbr_cluster_match_info.get(
+                                new_manifestation.manifestation_match_data_sha_1)
+
+                            # now, when we have new manifestation, we can compare items, which were created basing upon
+                            # this raw bibliographic record
+
+                            # TODO
+
+                        # Redis version
+                        else:
+                            pass # TODO
+
+                    # if something has changed, situation gets a bit complicated
+                    # since single raw record can produce more than one frbr_cluster, we've got
+                    else:
+                        pass # TODO
 
                 # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
                 # or create and index new frbr_cluster
                 frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
                                                   indexed_frbr_clusters_by_titles,
                                                   indexed_frbr_clusters_by_raw_record_id,
-                                                  bib)
+                                                  indexed_manifestations_by_raw_record_id,
+                                                  pymarc_object)
 
-                # send clusters to final conversion
-                # TODO
+                # switch for initial import (final records are built only once after matching in initial import)
+                if not c_mc.IS_INITIAL_IMPORT:
+                    # send new/modified clusters to final conversion
+                    # TODO
+                    pass
 
 
 

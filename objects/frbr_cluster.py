@@ -314,8 +314,8 @@ class FRBRCluster(object):
     def get_raw_record_id(self, bib_object):
         self.original_raw_record_id = bib_object.get_fields('001')[0].value()
 
-    def create_manifestation(self, bib):
-        self.manifestation_from_original_raw_record = FRBRManifestation(self.original_raw_record_id, bib)
+    def create_manifestation(self, pymarc_object):
+        self.manifestation_from_original_raw_record = FRBRManifestation(self.original_raw_record_id, pymarc_object)
 
     def create_expression_and_add_manifestation(self):
         expression_to_add = FRBRExpression(self.expression_distinctive_tuple_from_original_raw_record,
@@ -583,11 +583,11 @@ class FRBRCluster(object):
             {'uuid': self.manifestation_from_original_raw_record.uuid,
              'manifestation_match_data_sha_1': self.manifestation_from_original_raw_record.manifestation_match_data_sha_1})
 
-    def match_work_and_index(self,
-                             indexed_frbr_clusters_by_uuid: dict,
-                             indexed_frbr_clusters_by_titles: dict,
-                             indexed_frbr_clusters_by_raw_record_id: dict,
-                             bib) -> None:
+    def match_work(self,
+                   indexed_frbr_clusters_by_uuid: Union[dict, redis.Redis],
+                   indexed_frbr_clusters_by_titles: Union[dict, redis.Redis],
+                   indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis],
+                   indexed_manifestations_by_raw_record_id: Union[dict, redis.Redis]):
 
         candidate_clusters = set()
         matched_clusters = set()
@@ -612,7 +612,21 @@ class FRBRCluster(object):
 
         matched_clusters = list(matched_clusters)
 
-        self.create_manifestation(bib)
+
+    def match_work_and_index(self,
+                             indexed_frbr_clusters_by_uuid: Union[dict, redis.Redis],
+                             indexed_frbr_clusters_by_titles: Union[dict, redis.Redis],
+                             indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis],
+                             indexed_manifestations_by_raw_record_id: Union[dict, redis.Redis],
+                             pymarc_object) -> None:
+
+        matched_clusters = self.match_work(indexed_frbr_clusters_by_uuid,
+                                           indexed_frbr_clusters_by_titles,
+                                           indexed_frbr_clusters_by_raw_record_id,
+                                           indexed_manifestations_by_raw_record_id)
+
+        self.create_manifestation(pymarc_object)
+        self.index_manifestation(indexed_manifestations_by_raw_record_id)
         self.set_manifestation_by_raw_record_id_based_on_original_raw_record()
 
         # no matches for this FRBRCluster stub
@@ -636,4 +650,16 @@ class FRBRCluster(object):
                                                  indexed_frbr_clusters_by_uuid,
                                                  indexed_frbr_clusters_by_titles,
                                                  indexed_frbr_clusters_by_raw_record_id)
+
+    def index_manifestation(self, indexed_manifestations_by_raw_record_id: Union[dict, redis.Redis]) -> None:
+        if type(indexed_manifestations_by_raw_record_id) == dict:
+            indexed_manifestations_by_raw_record_id[
+                self.manifestation_from_original_raw_record.raw_record_id] = self.manifestation_from_original_raw_record
+
+    def rebuild_work_and_expression_data(self, new_work_data, new_expression_data):
+        # rebuild work_data
+        self.work_data_by_raw_record_id[new_work_data.raw_record_id] = new_work_data
+
+        # rebuild expression_data
+        # TODO
 
