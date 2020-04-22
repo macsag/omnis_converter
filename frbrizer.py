@@ -41,19 +41,19 @@ def is_245_indicator_2_valid(pymarc_object):
 
 def main_loop(configuration: dict):
     # dict with real FRBRCluster objects by uuid
-    indexed_frbr_clusters_by_uuid = {}
+    indexed_frbr_clusters_by_uuid = c_mc.INDEXED_FRBR_CLUSTERS_BY_UUID
 
     # helper dict for matching: {'title': [FRBRCluster uuid, ...]}
-    indexed_frbr_clusters_by_titles = {}
+    indexed_frbr_clusters_by_titles = c_mc.INDEXED_FRBR_CLUSTERS_BY_TITLES
 
     # helper dict for garbage collection:
     # {'raw_record_id': {'current_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...),
     # 'previous_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...)}}
-    indexed_frbr_clusters_by_raw_record_id = {}
+    indexed_frbr_clusters_by_raw_record_id = c_mc.INDEXED_FRBR_CLUSTERS_BY_RAW_RECORD_ID
 
-    indexed_manifestations_by_raw_record_id = {}
-    indexed_manifestations_bn_by_titles_245 = {}
-    indexed_manifestations_bn_by_titles_490 = {}
+    indexed_manifestations_by_uuid = c_mc.INDEXED_MANIFESTATIONS_BY_UUID
+    #indexed_manifestations_bn_by_titles_245 = {}
+    #indexed_manifestations_bn_by_titles_490 = {}
 
     # prepare indexes
     # logging.info('Indexing institutions...')
@@ -108,8 +108,12 @@ def main_loop(configuration: dict):
                         frbr_cluster.original_raw_record_id)
                 # Redis version
                 else:
-                    frbr_cluster_match_info = pickle.loads(indexed_frbr_clusters_by_raw_record_id.get(
-                        frbr_cluster.original_raw_record_id))
+                    frbr_cluster_match_info_raw = indexed_frbr_clusters_by_raw_record_id.get(
+                        frbr_cluster.original_raw_record_id)
+                    if frbr_cluster_match_info_raw:
+                        frbr_cluster_match_info = pickle.loads(frbr_cluster_match_info_raw)
+                    else:
+                        frbr_cluster_match_info = None
 
 
                 # if record was already indexed, compare match_data
@@ -140,8 +144,9 @@ def main_loop(configuration: dict):
                             new_manifestation.uuid = frbr_cluster_match_info.get(
                                 new_manifestation.manifestation_match_data_sha_1)
 
-                            # now, when we have new manifestation, we can compare items, which were created basing upon
-                            # this raw bibliographic record
+                            # now, when we have new manifestation, we can compare items, which were created earlier
+                            # from this raw bibliographic record - we have to be sure, that number of item records
+                            # (one record per library) and item record count (one library can have more than one volume)
 
                             # TODO
 
@@ -159,7 +164,7 @@ def main_loop(configuration: dict):
                 frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
                                                   indexed_frbr_clusters_by_titles,
                                                   indexed_frbr_clusters_by_raw_record_id,
-                                                  indexed_manifestations_by_raw_record_id,
+                                                  indexed_manifestations_by_uuid,
                                                   pymarc_object)
 
                 # switch for initial import (final records are built only once after matching in initial import)

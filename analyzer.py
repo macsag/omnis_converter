@@ -45,5 +45,6 @@ def produce_frbr_cluster_from_single_work(pymarc_object: Record) -> Optional[FRB
     frbr_cluster.get_sha_1_of_work_match_data()
     frbr_cluster.get_sha_1_of_expression_match_data()
     frbr_cluster.get_work_data_from_single_work_record(pymarc_object)
+    frbr_cluster.get_expression_data_from_single_work_record(pymarc_object)
 
     return frbr_cluster
