@@ -348,60 +348,51 @@ class FRBRCluster(object):
 
         matched_frbr_cluster = matched_clusters_to_merge_with[0]
 
+        already_indexed = []
+
         # perform these actions only if merging stub with existing frbr_cluster
         # in this case stub is never indexed and dies after merging
         if self.stub:
-            print(self.uuid)
-            print('Merging stub with existing.')
-            print(matched_frbr_cluster)
-            print(matched_clusters_to_merge_with)
             self.merge_titles(matched_frbr_cluster)
             self.merge_manifestations_by_original_raw_id(matched_frbr_cluster)
-            self.merge_children(matched_frbr_cluster,
-                                indexed_frbr_clusters_by_uuid,
-                                indexed_frbr_clusters_by_titles,
-                                indexed_frbr_clusters_by_raw_record_id)
+            self.merge_children(matched_frbr_cluster)
             self.merge_work_data_by_raw_record_id(matched_frbr_cluster,
                                                   indexed_frbr_clusters_by_raw_record_id)
             matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
-            #matched_frbr_cluster.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
+
             if len(matched_clusters_to_merge_with) > 1:
-                print('Going down...')
                 matched_frbr_cluster.merge_frbr_clusters_and_reindex(matched_clusters_to_merge_with[1:],
                                                                      indexed_frbr_clusters_by_uuid,
                                                                      indexed_frbr_clusters_by_titles,
                                                                      indexed_frbr_clusters_by_raw_record_id)
-            if type(indexed_frbr_clusters_by_uuid) != dict:
-                indexed_frbr_clusters_by_uuid.set(matched_frbr_cluster.uuid, pickle.dumps(matched_frbr_cluster))
 
         # perform these actions only if merging two or more existing frbr_clusters
         # in this case all matched frbr_clusters will be merged with last frbr_cluster on the list
         # and will die after that (they will be unindexed and deleted from the main index)
         else:
-            print(self.uuid)
-            print('Merging existing with existing.')
-            print(matched_frbr_cluster)
-            print(matched_clusters_to_merge_with)
             self.unindex_frbr_cluster_by_titles_before_merge(indexed_frbr_clusters_by_titles)
             self.merge_titles(matched_frbr_cluster)
             self.merge_manifestations_by_original_raw_id(matched_frbr_cluster)
-            self.merge_children(matched_frbr_cluster,
-                                indexed_frbr_clusters_by_uuid,
-                                indexed_frbr_clusters_by_titles,
-                                indexed_frbr_clusters_by_raw_record_id)
+            self.merge_children(matched_frbr_cluster)
             self.merge_work_data_by_raw_record_id(matched_frbr_cluster,
                                                   indexed_frbr_clusters_by_raw_record_id)
 
             matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
-            #matched_frbr_cluster.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
 
-            indexed_frbr_clusters_by_uuid.pop(self.uuid)
+            if type(indexed_frbr_clusters_by_uuid) == dict:
+                indexed_frbr_clusters_by_uuid.pop(self.uuid)
+            else:
+                indexed_frbr_clusters_by_uuid.delete(self.uuid)
 
             if len(matched_clusters_to_merge_with) > 1:
                 matched_frbr_cluster.merge_frbr_clusters_and_reindex(matched_clusters_to_merge_with[1:],
                                                                      indexed_frbr_clusters_by_uuid,
                                                                      indexed_frbr_clusters_by_titles,
                                                                      indexed_frbr_clusters_by_raw_record_id)
+
+        if type(indexed_frbr_clusters_by_uuid) != dict:
+            matched_frbr_cluster = matched_clusters_to_merge_with[-1]
+            indexed_frbr_clusters_by_uuid.set(matched_frbr_cluster.uuid, pickle.dumps(matched_frbr_cluster))
 
     def merge_titles(self, matched_frbr_cluster: FRBRCluster) -> None:
         for title, counter in self.titles.items():
@@ -422,10 +413,7 @@ class FRBRCluster(object):
                                                                             indexed_frbr_clusters_by_raw_record_id)
 
     def merge_children(self,
-                       matched_frbr_cluster: FRBRCluster,
-                       indexed_frbr_clusters_by_uuid: Union[dict, redis.Redis],
-                       indexed_frbr_clusters_by_titles: Union[dict, redis.Redis],
-                       indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis]) -> None:
+                       matched_frbr_cluster: FRBRCluster) -> None:
 
         # merge strategy for merging two already existing frbr_clusters
         if not self.stub:
@@ -557,15 +545,11 @@ class FRBRCluster(object):
                                    {self.manifestation_from_original_raw_record.manifestation_match_data_sha_1:
                                     manifestation_uuid}}
 
-                for match_data_type, match_data in update_data.items():
-                    for sha_1, uuid in match_data.items():
-                        if type(indexed_frbr_clusters_by_raw_record_id) == dict:
-                            indexed_frbr_clusters_by_raw_record_id.setdefault(
-                                manifestation_raw_record_id, {}).setdefault(
-                                match_data_type, {}).setdefault(sha_1, uuid)
-                        else:
-                            indexed_frbr_clusters_by_raw_record_id.set(manifestation_raw_record_id,
-                                                                       pickle.dumps(update_data))
+                if type(indexed_frbr_clusters_by_raw_record_id) == dict:
+                    indexed_frbr_clusters_by_raw_record_id[manifestation_raw_record_id] = update_data
+                else:
+                    indexed_frbr_clusters_by_raw_record_id.set(manifestation_raw_record_id,
+                                                               pickle.dumps(update_data))
 
     def index_frbr_cluster_by_raw_record_id_single(self,
                                                    raw_record_id,
@@ -582,11 +566,13 @@ class FRBRCluster(object):
                            {manifestation.get('manifestation_match_data_sha_1'): manifestation.get('uuid')}}
 
         if type(indexed_frbr_clusters_by_raw_record_id) == dict:
+            to_update_data = indexed_frbr_clusters_by_raw_record_id.get(raw_record_id)
+
             for match_data_type, match_data in update_data.items():
                 for sha_1, uuid in match_data.items():
-                    indexed_frbr_clusters_by_raw_record_id.setdefault(
-                        raw_record_id, {}).setdefault(
-                        match_data_type, {}).setdefault(sha_1, uuid)
+                    mt = to_update_data.get(match_data_type)
+                    mt[sha_1] = uuid
+
         else:
             to_update_raw = indexed_frbr_clusters_by_raw_record_id.get(raw_record_id)
             if to_update_raw:
@@ -594,8 +580,8 @@ class FRBRCluster(object):
 
                 for match_data_type, match_data in update_data.items():
                     for sha_1, uuid in match_data.items():
-                        to_update_unpickled.setdefault(
-                            match_data_type, {}).setdefault(sha_1, uuid)
+                        mt = to_update_unpickled.get(match_data_type)
+                        mt[sha_1] = uuid
 
                 updated_pickled = pickle.dumps(to_update_unpickled)
                 indexed_frbr_clusters_by_raw_record_id.set(raw_record_id, updated_pickled)
