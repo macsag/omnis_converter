@@ -17,10 +17,18 @@ def get_data_for_matching(manifestation):
 
     numbers_from_title_245 = ''.join(gr for gr in re.findall('\d', title_245))
     place_pub_260_a_first_word = get_values_by_field_and_subfield(manifestation, ('260', ['a']))[0].split()[0]
-    num_of_pages_300_a = max(int(gr) for gr in re.findall('\d+',
+
+    try:
+        num_of_pages_300_a = max(int(gr) for gr in re.findall('\d+',
                                                           get_values_by_field_and_subfield(manifestation,
                                                                                            ('300', ['a']))[0]))
-    b_format = int(re.search('\d+', get_values_by_field_and_subfield(manifestation, ('300', ['c']))[0])[0])
+    except (ValueError, IndexError):
+        num_of_pages_300_a = 0
+
+    try:
+        b_format = int(re.search('\d+', get_values_by_field_and_subfield(manifestation, ('300', ['c']))[0])[0])
+    except (TypeError, IndexError):
+        b_format = 0
     edition = postprocess(normalize_edition_for_matching, get_values_by_field(manifestation, '250'))
 
     return ManifestationMatchData(ldr_67=ldr_67, val_008_0614=val_008_0614, isbn_020_az=isbn_020_az, title_245=title_245,

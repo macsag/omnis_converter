@@ -1,6 +1,6 @@
 import redis
 
-IS_INITIAL_IMPORT = False
+IS_INITIAL_IMPORT = True
 
 
 # INDEXED_FRBR_CLUSTERS_BY_UUID = {}

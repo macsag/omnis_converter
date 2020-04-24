@@ -366,7 +366,7 @@ if __name__ == '__main__':
                'buffer': buff,
                'run_manif_matcher': False,
                'frbr_step_two': False,
-               'limit': 10000,
+               'limit': 1000000,
                'limit_mak': 3}
 
     main_loop(configs)

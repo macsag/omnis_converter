@@ -377,7 +377,8 @@ class FRBRCluster(object):
             self.merge_work_data_by_raw_record_id(matched_frbr_cluster,
                                                   indexed_frbr_clusters_by_raw_record_id)
 
-            matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
+            if not len(matched_clusters_to_merge_with) > 1:
+                matched_frbr_cluster.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
 
             if type(indexed_frbr_clusters_by_uuid) == dict:
                 indexed_frbr_clusters_by_uuid.pop(self.uuid)
@@ -507,7 +508,7 @@ class FRBRCluster(object):
                 if counter.prev_count == 0:
                     indexed_frbr_clusters_by_titles.setdefault(title, set()).add(self.uuid)
         else:
-            p = indexed_frbr_clusters_by_titles.pipeline()
+            p = indexed_frbr_clusters_by_titles.pipeline(transaction=False)
             for title, counter in self.titles.items():
                 if counter.prev_count == 0:
                     p.sadd(title, self.uuid)
@@ -520,7 +521,7 @@ class FRBRCluster(object):
                 uuids_by_title = indexed_frbr_clusters_by_titles.get(title)
                 uuids_by_title.discard(self.uuid)
         else:
-            p = indexed_frbr_clusters_by_titles.pipeline()
+            p = indexed_frbr_clusters_by_titles.pipeline(transaction=False)
             for title in self.titles.keys():
                 p.srem(title, self.uuid)
             p.execute()
@@ -568,10 +569,14 @@ class FRBRCluster(object):
         if type(indexed_frbr_clusters_by_raw_record_id) == dict:
             to_update_data = indexed_frbr_clusters_by_raw_record_id.get(raw_record_id)
 
-            for match_data_type, match_data in update_data.items():
-                for sha_1, uuid in match_data.items():
-                    mt = to_update_data.get(match_data_type)
-                    mt[sha_1] = uuid
+            if to_update_data:
+                for match_data_type, match_data in update_data.items():
+                    for sha_1, uuid in match_data.items():
+                        mt = to_update_data.get(match_data_type)
+                        mt[sha_1] = uuid
+            else:
+                indexed_frbr_clusters_by_raw_record_id[raw_record_id] = update_data
+
 
         else:
             to_update_raw = indexed_frbr_clusters_by_raw_record_id.get(raw_record_id)
@@ -649,6 +654,7 @@ class FRBRCluster(object):
                         matched_clusters.add(unpickled_candidate)
 
             matched_clusters = list(matched_clusters)
+            matched_clusters.sort(key=lambda x: len(x.manifestations_by_raw_record_id), reverse=True)
             return matched_clusters
 
     def match_work_and_index(self,
@@ -673,8 +679,6 @@ class FRBRCluster(object):
             self.index_frbr_cluster_by_titles(indexed_frbr_clusters_by_titles)
             self.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
             self.index_frbr_cluster_by_uuid(indexed_frbr_clusters_by_uuid)
-
-            print("Creating new!")
 
         # there are one or more matches for this FRBRCluster stub
         else:
