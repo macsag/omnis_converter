@@ -20,7 +20,7 @@ class FRBRManifestation(object):
     __slots__ = ['uuid', 'raw_record_id', 'manifestation_match_data', 'manifestation_match_data_sha_1',
                  'mat_nlp_id', 'mat_external_id', 'mat_isbn', 'mat_carrier_type', 'mat_media_type',
                  'mat_number_of_pages', 'mat_physical_info', 'mat_pub_city', 'mat_nat_bib', 'mat_edition',
-                 'mat_contributor']
+                 'mat_contributor', 'items_by_institution_code']
 
     def __init__(self, raw_record_id, bib_object):
         self.uuid = str(uuid4())
@@ -43,6 +43,9 @@ class FRBRManifestation(object):
         self.mat_contributor = []
         self.mat_nat_bib = []  # todo
         self.mat_edition = get_values_by_field(bib_object, '250')
+
+        # items
+        self.items_by_institution_code = {}
 
     def __repr__(self):
         return f'Manifestation(id={self.uuid}, raw_record_id={self.raw_record_id})'

@@ -25,13 +25,12 @@ def is_245_indicator_2_valid(pymarc_object):
 
 
 def main_loop(configuration: dict):
-    # dict with real FRBRCluster objects by uuid
+    # index with real FRBRCluster objects by uuid
     indexed_frbr_clusters_by_uuid = c_mc.INDEXED_FRBR_CLUSTERS_BY_UUID
-
-    # helper dict for matching: {'title': [FRBRCluster uuid, ...]}
+    # helper index used for FRBRclusters matching
+    # {'title': [FRBRCluster uuid, ...]}
     indexed_frbr_clusters_by_titles = c_mc.INDEXED_FRBR_CLUSTERS_BY_TITLES
-
-    # helper dict for garbage collection:
+    # helper index for garbage collection:
     # {'raw_record_id': {'current_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...),
     # 'previous_matches': set((frbr_cluster_uuid, expression_uuid, manifestation_uuid), ...)}}
     indexed_frbr_clusters_by_raw_record_id = c_mc.INDEXED_FRBR_CLUSTERS_BY_RAW_RECORD_ID
@@ -59,8 +58,41 @@ def main_loop(configuration: dict):
 
     # used for limit and stats
     counter = 0
+    item_conversion_table = {"physical_item":
+                    {"item_field_tag": "852",
+                     "item_count":
+                        {"field": None,
+                         "subfields": None},
+                    "item_url":
+                        {"field": None,
+                         "subfields": None,
+                         "scheme":
+                            {"prefix": "https://katalogi.bn.org.pl/discovery/fulldisplay?docid=alma",
+                             "suffix": "&context=L&vid=48OMNIS_NLOP:48OMNIS_NLOP",
+                             "infix": {"field": "009", "subfields": None}}},
+                    "item_library_code":
+                        {"field": None,
+                         "subfields": None,
+                         "from_ct": "BN"}
+                     },
+                "digital_item":
+                    {"item_field_tag": "856",
+                     "item_count":
+                         {"field": None,
+                         "subfields": None},
+                     "item_url":
+                         {"field": "this_field",
+                          "subfields": ["u"],
+                          "scheme": None},
+                     "item_library_code":
+                         {"field": None,
+                          "subfields": None,
+                          "from_ct": "POLONA"},
+                     }
+                }
 
     for pymarc_object in tqdm(read_marc_from_file(configuration['bn_file_in'])):
+
         if c_valid.is_document_type(pymarc_object) and \
                 c_valid.is_single_or_multi_work(pymarc_object) == 'single_work' and \
                 has_items(pymarc_object) and \
@@ -100,7 +132,6 @@ def main_loop(configuration: dict):
                             frbr_cluster_match_info = pickle.loads(frbr_cluster_match_info_raw)
                         else:
                             frbr_cluster_match_info = None
-
 
                     # if record was already indexed, compare match_data
                     if frbr_cluster_match_info:
@@ -151,7 +182,8 @@ def main_loop(configuration: dict):
                                                   indexed_frbr_clusters_by_titles,
                                                   indexed_frbr_clusters_by_raw_record_id,
                                                   indexed_manifestations_by_uuid,
-                                                  pymarc_object)
+                                                  pymarc_object,
+                                                  item_conversion_table)
 
                 # switch for initial import (final records are built only once after matching in initial import)
                 if not c_mc.IS_INITIAL_IMPORT:

@@ -1,5 +1,8 @@
-from pymarc import MARCReader
 import re
+from typing import Union
+
+from pymarc import MARCReader, Record, Field
+
 
 
 def read_marc_from_file(file):
@@ -19,18 +22,34 @@ def get_values_by_field(marc21_record, field):
     return [v.value() for v in marc21_record.get_fields(field)]
 
 
-def get_values_by_field_and_subfield(marc21_record, field_and_subfields):
+def get_values_by_field_and_subfield(pymarc_record_or_field: Union[Record, Field], field_and_subfields: tuple) -> list:
+    """
+    Get values by field or by field and subfield or from field or from field and subfield.
+    Returns list of values or empty list.
+    """
     values_to_return = []
-
     field, subfields = field_and_subfields[0], field_and_subfields[1]
 
-    if field in marc21_record:
-        raw_objects_fields_list = marc21_record.get_fields(field)
+    if type(pymarc_record_or_field) == Record:
+        field, subfields = field_and_subfields[0], field_and_subfields[1]
 
-        for raw_object_field in raw_objects_fields_list:
-            to_append = ' '.join(subfield for subfield in raw_object_field.get_subfields(*subfields))
-            if to_append:
-                values_to_return.append(to_append)
+        if subfields:
+            if field in pymarc_record_or_field:
+                raw_objects_fields_list = pymarc_record_or_field.get_fields(field)
+
+                for raw_object_field in raw_objects_fields_list:
+                    to_append = ' '.join(subfield for subfield in raw_object_field.get_subfields(*subfields))
+                    if to_append:
+                        values_to_return.append(to_append)
+        else:
+            if field in pymarc_record_or_field:
+                for value in pymarc_record_or_field.get_fields(field):
+                    values_to_return.append(value.value())
+
+    else:
+        to_append = ' '.join(subfield for subfield in pymarc_record_or_field.get_subfields(*subfields))
+        if to_append:
+            values_to_return.append(to_append)
 
     return values_to_return
 
