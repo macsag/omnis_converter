@@ -1,9 +1,13 @@
+from pymarc import Record
+
+import exceptions.exceptions as oe
+
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
 from commons.marc_iso_commons import is_dbn
 
-from commons.validators import is_number_of_1xx_fields_valid
 from commons.normalization import normalize_title
 
+from objects.frbr_cluster import FRBRCluster
 from objects.helper_objects import ObjCounter
 
 
@@ -14,51 +18,22 @@ class WorkData(object):
 
     raw record -> [FRBRCluster containing WorkData, FRBRCluster containing WorkData, ...]
 
-    In final conversion all of the WorkData from one FRBRCluster is joined and final Work instance is produced.
+    In final conversion all of the WorkData from one FRBRCluster is joined and FinalWork instance is produced.
 
     WorkData serves for splitting and joining FRBRClusters as well:
-    'main_creator_for_cluster', 'other_creator_for_cluster', 'titles_for_cluster'
-    and
-    'work_match_data_sha_1'
+    'main_creator_for_cluster', 'other_creator_for_cluster', 'titles_for_cluster', 'work_match_data_sha_1'
     are used in this process.
     """
-    __slots__ = ['raw_record_id',
-                 'main_creator_for_cluster', 'other_creator_for_cluster', 'titles_for_cluster',
-                 'work_match_data_sha_1',
-                 'main_creator', 'other_creator',
-                 'main_creator_real',
-                 'titles240', 'titles245', 'titles245p', 'titles246_title_orig', 'titles246_title_other',
-                 'language_codes', 'language_of_orig_codes',
-                 'language_orig', 'language_orig_obj',
-                 'work_main_creator', 'work_other_creator', 'work_udc', 'work_time_created',
-                 'work_form', 'work_genre', 'work_cultural_group', 'work_subject_person', 'work_subject_corporate_body',
-                 'work_subject_event', 'work_subject', 'work_subject_place', 'work_subject_time', 'work_subject_domain',
-                 'work_subject_work',
-                 'title_with_nonf_chars']
-
-    def __init__(self, frbr_cluster, pymarc_object):
+    def __init__(self, frbr_cluster: FRBRCluster, pymarc_object: Record):
         # data needed for merging and splitting FRBRClusters and deleting work_data from FRBRCluster
         self.raw_record_id = frbr_cluster.original_raw_record_id
-        self.main_creator_for_cluster = frbr_cluster.main_creator
-        self.other_creator_for_cluster = frbr_cluster.other_creator
+        self.main_creator_for_cluster = frbr_cluster.main_creator_nlp_id
+        self.other_creator_for_cluster = frbr_cluster.other_creator_nlp_id
         self.titles_for_cluster = frbr_cluster.titles
 
-        self.work_match_data_sha_1 = frbr_cluster.work_match_data_sha_1
+        self.work_match_data_sha_1 = frbr_cluster.work_match_data_sha_1_nlp_id
 
-        # creators for frbrization process
-        self.main_creator = set()
-        self.other_creator = set()
-
-        # creators for record real metadata
-        self.main_creator_real = set()
-
-        self.titles240 = set()
-        self.titles245 = {}
-        self.titles245p = set()
-        self.titles246_title_orig = {}
-        self.titles246_title_other = {}
-
-        # helper dict of creators for control of nonfiling characters
+        # helper dict of titles for control of nonfiling characters
         self.title_with_nonf_chars = {}
 
         self.language_codes = set()
@@ -66,9 +41,16 @@ class WorkData(object):
         self.language_orig = ''
         self.language_orig_obj = None
 
-        # work_data attributes (no need for calculations or joins)
-        self.work_main_creator = []
-        self.work_other_creator = []
+        # raw work_data attributes (no need for calculations or joins)
+        self.main_creator_real_nlp_id = set()
+        self.other_creator_real_nlp_id = set()
+
+        self.titles240 = set()
+        self.titles245 = {}
+        self.titles245p = set()
+        self.titles246_title_orig = {}
+        self.titles246_title_other = {}
+
 
         self.work_time_created = []
         self.work_form = set()
@@ -92,164 +74,166 @@ class WorkData(object):
     def __repr__(self):
         return f'WorkData(raw_record_id={self.raw_record_id})'
 
-    # 3.1.1
-    def get_main_creator(self, bib_object, descr_index):
-        list_val_100abcd = get_values_by_field_and_subfield(bib_object, ('100', ['0']))
-        list_val_110abcdn = get_values_by_field_and_subfield(bib_object, ('110', ['0']))
-        list_val_111abcdn = get_values_by_field_and_subfield(bib_object, ('111', ['0']))
+    def get_main_creator_real_nlp_id(self, pymarc_object: Record):
+        list_val_100_0 = get_values_by_field_and_subfield(pymarc_object, ('100', ['0']))
+        list_val_110_0 = get_values_by_field_and_subfield(pymarc_object, ('110', ['0']))
+        list_val_111_0 = get_values_by_field_and_subfield(pymarc_object, ('111', ['0']))
 
-        # validate number of 1XX fields in record and raise exception if not
-        is_number_of_1xx_fields_valid(list_val_100abcd, list_val_110abcdn, list_val_111abcdn)
+        if list_val_100_0:
+            self.main_creator_real_nlp_id.add(list_val_100_0[0])
+        if list_val_110_0:
+            self.main_creator_real_nlp_id.add(list_val_110_0[0])
+        if list_val_111_0:
+            self.main_creator_real_nlp_id.add(list_val_111_0[0])
 
-        # 3.1.1.1 - there is 1XX field [CHECKED]
-        if list_val_100abcd:
-            self.main_creator.add(list_val_100abcd[0])
-            self.main_creator_real.add(list_val_100abcd[0])
-        if list_val_110abcdn:
-            self.main_creator.add(list_val_110abcdn[0])
-            self.main_creator_real.add(list_val_110abcdn[0])
-        if list_val_111abcdn:
-            self.main_creator.add(list_val_111abcdn[0])
-            self.main_creator_real.add(list_val_111abcdn[0])
+        list_val_700_0 = set()
+        list_val_710_0 = set()
+        list_val_711_0 = set()
 
-        # 3.1.1.2 - if there is no 1XX field, check for 7XX [CHECKED]
-        list_val_700abcd = set()
-        list_val_710abcdn = set()
-        list_val_711abcdn = set()
+        main_creators_to_add = set()
 
-        list_700_fields = bib_object.get_fields('700')
+        list_700_fields = pymarc_object.get_fields('700')
         if list_700_fields:
             for field in list_700_fields:
                 e_subflds = field.get_subfields('e')
-                if e_subflds:
+                t_subflds = field.get_subfields('t')
+                if e_subflds and not t_subflds:
                     if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
-                        list_val_700abcd.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-                else:
-                    list_val_700abcd.add(
-                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_700_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
+                if not e_subflds and not t_subflds:
+                    value_to_add = field.get_subfields('0')
+                    if value_to_add:
+                        list_val_700_0.add(value_to_add[0])
+                    else:
+                        raise oe.DescriptorNotResolved
 
-        resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-        # only_values_from_list_700 = only_values(resolved_list_700)
+        main_creators_to_add.update(list_val_700_0)
 
-        if not self.main_creator:
-            self.main_creator.update(resolved_list_700)
-        self.main_creator_real.update(resolved_list_700)
-
-        list_710_fields = bib_object.get_fields('710')
+        list_710_fields = pymarc_object.get_fields('710')
         if list_710_fields:
             for field in list_710_fields:
                 e_subflds = field.get_subfields('e')
                 subflds_4 = field.get_subfields('4')
-                if e_subflds:
+                t_subflds = field.get_subfields('t')
+                if e_subflds and not t_subflds:
                     if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
-                        list_val_710abcdn.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                if not e_subflds and not subflds_4:
-                    list_val_710abcdn.add(
-                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_710_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
+                if not e_subflds and not subflds_4 and not t_subflds:
+                    value_to_add = field.get_subfields('0')
+                    if value_to_add:
+                        list_val_710_0.add(value_to_add[0])
+                    else:
+                        raise oe.DescriptorNotResolved
 
-        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-        # only_values_from_list_710 = only_values(resolved_list_710)
+        main_creators_to_add.update(list_val_710_0)
 
-        if not self.main_creator:
-            self.main_creator.update(resolved_list_710)
-        self.main_creator_real.update(resolved_list_710)
-
-        list_711_fields = bib_object.get_fields('711')
+        list_711_fields = pymarc_object.get_fields('711')
         if list_711_fields:
             for field in list_711_fields:
                 j_subflds = field.get_subfields('j')
                 subflds_4 = field.get_subfields('4')
-                if j_subflds:
+                t_subflds = field.get_subfields('t')
+                if j_subflds and not t_subflds:
                     if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
-                        list_val_711abcdn.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                if not j_subflds and not subflds_4:
-                    list_val_711abcdn.add(
-                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_711_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
+                if not j_subflds and not subflds_4 and not t_subflds:
+                    value_to_add = field.get_subfields('0')
+                    if value_to_add:
+                        list_val_711_0.add(value_to_add[0])
+                    else:
+                        raise oe.DescriptorNotResolved
 
-        resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-        # only_values_from_list_711 = only_values(resolved_list_711)
+        main_creators_to_add.update(list_val_711_0)
 
-        if not self.main_creator:
-            self.main_creator.update(resolved_list_711)
-        self.main_creator_real.update(resolved_list_711)
+        for main_creator in main_creators_to_add:
+            self.main_creator_real_nlp_id.add(main_creator)
 
-    # 3.1.2
-    def get_other_creator(self, bib_object, descr_index):
-        if not self.main_creator:
-            list_val_700abcd = set()
-            list_val_710abcdn = set()
-            list_val_711abcdn = set()
+    def get_other_creator_real_nlp_id(self, pymarc_object: Record) -> None:
+        list_val_700_0 = set()
+        list_val_710_0 = set()
+        list_val_711_0 = set()
 
-            list_700_fields = bib_object.get_fields('700')
-            if list_700_fields:
-                for field in list_700_fields:
-                    e_subflds = field.get_subfields('e')
-                    if e_subflds:
-                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
-                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
-                            list_val_700abcd.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
+        other_creators_to_add = set()
 
-            resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-            # only_values_from_list_700 = only_values(resolved_list_700)
+        list_700_fields = pymarc_object.get_fields('700')
+        if list_700_fields:
+            for field in list_700_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                    if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_700_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
 
-            self.other_creator.update(resolved_list_700)
+        other_creators_to_add.update(list_val_700_0)
 
-            list_710_fields = bib_object.get_fields('710')
-            if list_710_fields:
-                for field in list_710_fields:
-                    e_subflds = field.get_subfields('e')
-                    if e_subflds:
-                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
-                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
-                            list_val_710abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+        list_710_fields = pymarc_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds:
+                    e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                    if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_710_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
 
-            resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-            # only_values_from_list_710 = only_values(resolved_list_710)
+        other_creators_to_add.update(list_val_710_0)
 
-            self.other_creator.update(resolved_list_710)
+        list_711_fields = pymarc_object.get_fields('711')
+        if list_711_fields:
+            for field in list_711_fields:
+                j_subflds = field.get_subfields('j')
+                if j_subflds:
+                    j_sub_joined = ' '.join(j_sub for j_sub in j_subflds)
+                    if 'Red' in j_sub_joined or 'Oprac' in j_sub_joined or 'Wybór' in j_sub_joined:
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_711_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
 
-            list_711_fields = bib_object.get_fields('711')
-            if list_711_fields:
-                for field in list_711_fields:
-                    j_subflds = field.get_subfields('j')
-                    if j_subflds:
-                        j_sub_joined = ' '.join(j_sub for j_sub in j_subflds)
-                        if 'Red' in j_sub_joined or 'Oprac' in j_sub_joined or 'Wybór' in j_sub_joined:
-                            list_val_711abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
+        other_creators_to_add.update(list_val_711_0)
 
-            resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-            # only_values_from_list_711 = only_values(resolved_list_711)
-
-            self.other_creator.update(resolved_list_711)
+        for other_creator in other_creators_to_add:
+            self.other_creator_real_nlp_id.add(other_creator)
 
     # 3.1.3
-    def get_titles(self, bib_object):
+    def get_titles(self, pymarc_object: Record):
         # get 245 field
-        title_245_raw = bib_object.get_fields('245')
-        field_008_raw = bib_object.get_fields('008')
+        title_245_raw = pymarc_object.get_fields('245')
+        field_008_raw = pymarc_object.get_fields('008')
 
-        # validate record
-        if len(title_245_raw) > 1 or not title_245_raw:
-            raise No245FieldFoundOrTooMany245Fields
         if not field_008_raw:
-            raise No008FieldFound
+            raise oe.No008FieldFound
 
         # get titles from 245 field
         lang_008 = field_008_raw[0].value()[35:38]
 
-        list_val_245ab = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
-                                                                                             ('245', ['a', 'b'])))
+        list_val_245ab = postprocess(normalize_title, get_values_by_field_and_subfield(pymarc_object,
+                                                                                       ('245', ['a', 'b'])))
         title_245_raw_ind = title_245_raw[0].indicators
-        list_val_245a = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
-                                                                                            ('245', ['a'])))
-        val_245a_last_char = get_values_by_field_and_subfield(bib_object, ('245', ['a']))[0][-1]
-        list_val_245p = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object, ('245', ['p'])))
+        list_val_245a = postprocess(normalize_title, get_values_by_field_and_subfield(pymarc_object,
+                                                                                      ('245', ['a'])))
+        val_245a_last_char = get_values_by_field_and_subfield(pymarc_object, ('245', ['a']))[0].strip()[-1]
+        list_val_245p = postprocess(normalize_title, get_values_by_field_and_subfield(pymarc_object, ('245', ['p'])))
 
         if val_245a_last_char == '=' and not list_val_245p:
             to_add = list_val_245a[0]
@@ -261,8 +245,7 @@ class WorkData(object):
 
                 self.title_with_nonf_chars.setdefault(to_add[int(title_245_raw_ind[1]):],
                                                       set()).add(to_add)
-            except ValueError as err:
-                #print(err)
+            except ValueError:
                 self.titles245.setdefault(lang_008,
                                           {}).setdefault(to_add,
                                                          ObjCounter()).add(1)
@@ -279,7 +262,7 @@ class WorkData(object):
             self.title_with_nonf_chars.setdefault(to_add,
                                                   set()).add(to_add)
 
-        else:
+        if val_245a_last_char != '=' and not list_val_245p:
             to_add = list_val_245ab[0]
 
             try:
@@ -290,7 +273,6 @@ class WorkData(object):
                                                       set()).add(to_add)
 
             except ValueError as err:
-                #print(err)
                 self.titles245.setdefault(lang_008, {}).setdefault(to_add,
                                                                    ObjCounter()).add(1)
 
@@ -298,7 +280,7 @@ class WorkData(object):
                                                       set()).add(to_add)
 
         # get titles from 246 fields
-        list_fields_246 = bib_object.get_fields('246')
+        list_fields_246 = pymarc_object.get_fields('246')
         list_val_246_title_orig = []
         list_val_246_other = []
 
@@ -314,7 +296,7 @@ class WorkData(object):
                     list_val_246_other.append(' '.join(field.get_subfields('a', 'b')))
 
         list_val_246_title_orig = postprocess(normalize_title, list_val_246_title_orig)
-        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
+        lang_041_h = get_values_by_field_and_subfield(pymarc_object, ('041', ['h']))
 
         if len(lang_041_h) == 1 and len(list_val_246_title_orig) == 1:
             self.titles246_title_orig.setdefault(lang_041_h[0], {}).setdefault(list_val_246_title_orig[0],
@@ -325,19 +307,18 @@ class WorkData(object):
             self.titles246_title_other.setdefault(val, ObjCounter()).add(1)
 
         # get title from 240 field
-        title_240_raw_list = bib_object.get_fields('240')
+        title_240_raw_list = pymarc_object.get_fields('240')
         if title_240_raw_list:
             title_240_raw = title_240_raw_list[0]
 
-            list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
+            list_val_240 = get_values_by_field_and_subfield(pymarc_object, ('240', ['a', 'b']))
 
             try:
                 self.titles240.add(list_val_240[0][int(title_240_raw.indicators[1]):])
 
                 self.title_with_nonf_chars.setdefault(list_val_240[0][int(title_240_raw.indicators[1]):],
                                                       set()).add(list_val_240[0])
-            except ValueError as err:
-                #print(err)
+            except ValueError:
                 self.titles240.add(list_val_240[0])
                 self.title_with_nonf_chars.setdefault(list_val_240[0], set()).add(list_val_240[0])
 
@@ -364,6 +345,9 @@ class WorkData(object):
             self.language_orig = 'und'
 
     def get_attributes_from_pymarc_object(self, pymarc_object):
+        self.get_main_creator_real_nlp_id(pymarc_object)
+        self.get_other_creator_real_nlp_id(pymarc_object)
+
         # get simple attributes, without relations to descriptors
         self.work_udc.update(get_values_by_field_and_subfield(pymarc_object, ('080', ['a'])))
         self.get_language_of_original(pymarc_object)
@@ -399,3 +383,5 @@ class WorkData(object):
         #self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
 
         self.work_time_created = []  # todo
+
+

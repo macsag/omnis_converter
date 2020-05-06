@@ -14,6 +14,12 @@ def is_number_of_1xx_fields_valid(list_val_100abcd: list,
         raise TooMany1xxFields
 
 
+def is_fields_1xx_present(pymarc_object: Record) -> bool:
+    if pymarc_object.get_fields('100', '110', '111'):
+        return True
+    else:
+        return False
+
 def is_field_245_valid(title_245_raw: list) -> None:
     if len(title_245_raw) > 1:
         raise TooMany245Fields

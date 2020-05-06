@@ -5,13 +5,14 @@ import pickle
 
 from tqdm import tqdm
 from pymarc import parse_xml_to_array
+import stomp
+import pickle
 
 from analyzer import analyze_record_and_produce_frbr_clusters
 import commons.validators as c_valid
 from commons.marc_iso_commons import read_marc_from_file, get_values_by_field_and_subfield, get_values_by_field
 from commons.json_writer import JsonBufferOut
 
-from objects.item import MakItem
 
 import config.main_configuration as c_mc
 
@@ -70,7 +71,7 @@ def main_loop(configuration: dict):
                             {"prefix": "https://katalogi.bn.org.pl/discovery/fulldisplay?docid=alma",
                              "suffix": "&context=L&vid=48OMNIS_NLOP:48OMNIS_NLOP",
                              "infix": {"field": "009", "subfields": None}}},
-                    "item_library_code":
+                    "item_local_bib_id":
                         {"field": None,
                          "subfields": None,
                          "from_ct": "BN"}
@@ -84,7 +85,7 @@ def main_loop(configuration: dict):
                          {"field": "this_field",
                           "subfields": ["u"],
                           "scheme": None},
-                     "item_library_code":
+                     "item_local_bib_id":
                          {"field": None,
                           "subfields": None,
                           "from_ct": "POLONA"},
@@ -178,7 +179,7 @@ def main_loop(configuration: dict):
 
                 # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
                 # or create and index new frbr_cluster
-                frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
+                clusters_to_send = frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
                                                   indexed_frbr_clusters_by_titles,
                                                   indexed_frbr_clusters_by_raw_record_id,
                                                   indexed_manifestations_by_uuid,
@@ -189,7 +190,8 @@ def main_loop(configuration: dict):
                 if not c_mc.IS_INITIAL_IMPORT:
                     # send new/modified clusters to final conversion
                     # TODO
-                    pass
+                    connection_to_converter = configs['amq_conn']
+                    connection_to_converter.send('/queue/matcher-final-converter', pickle.dumps(clusters_to_send))
 
 
 
@@ -383,12 +385,17 @@ if __name__ == '__main__':
     logging.root.addHandler(logging.StreamHandler(sys.stdout))
     logging.root.setLevel(level=logging.DEBUG)
 
+
+
     #r_client_frbr_clusters_by_uuid = redis.Redis(db=0)
     #r_client_frbr_cluster_by_title = redis.Redis(db=1)
     #r_client_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
 
     buff = JsonBufferOut('./output/item.json', './output/materialization.json', './output/expression.json',
                          './output/work.json', './output/expression_data.json', './output/work_data.json')
+
+    c = stomp.Connection([('127.0.0.1', 61613)])
+    c.connect('admin', 'admin', wait=True)
 
     configs = {'bn_file_in': './input_files/bib_records/bn/bibs-ksiazka.marc',
                'mak_files_in': './input_files/bib_records/mak',
@@ -399,7 +406,8 @@ if __name__ == '__main__':
                'run_manif_matcher': False,
                'frbr_step_two': False,
                'limit': 1000000,
-               'limit_mak': 3}
+               'limit_mak': 3,
+               'amq_conn': c}
 
     main_loop(configs)
     buff.flush()

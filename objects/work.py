@@ -12,44 +12,21 @@ from commons.normalization import prepare_name_for_indexing, normalize_title
 from descriptor_resolver.resolve_record import resolve_field_value, only_values
 from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_serialize
 
+from objects.frbr_cluster import FRBRCluster
 from objects.expression import Expression
 from objects.helper_objects import ObjCounter
 
 import config.mock_es_id_prefixes as esid
 
 
-class Work(object):
-    __slots__ = ['uuid', 'mock_es_id', 'main_creator', 'other_creator', 'main_creator_real',
-                 'titles240', 'titles245', 'titles245p', 'titles246_title_orig',
-                 'titles246_title_other', 'language_codes', 'language_of_orig_codes',
-                 'language_orig', 'language_orig_obj', 'pub_country_codes', 'expressions_dict',
-                 'manifestations_bn_ids', 'manifestations_mak_ids', 'libraries', 'search_adress', 'search_authors',
-                 'search_identity', 'search_title', 'search_subject', 'search_formal', 'search_form', 'search_note',
-                 'filter_creator', 'filter_cultural_group', 'filter_form', 'filter_lang', 'filter_lang_orig',
-                 'filter_nat_bib_code', 'filter_nat_bib_year', 'filter_pub_country', 'filter_pub_date',
-                 'filter_publisher', 'filter_publisher_uniform', 'filter_subject', 'filter_subject_place',
-                 'filter_subject_time', 'filter_time_created', 'work_presentation_main_creator',
-                 'work_presentation_another_creator', 'sort_author', 'work_other_creator',
-                 'work_title_pref', 'work_title_of_orig_pref', 'work_title_alt', 'work_title_of_orig_alt',
-                 'work_title_index', 'work_main_creator', 'work_other_creator_index', 'work_udc', 'work_time_created',
-                 'work_form', 'work_genre', 'work_cultural_group', 'work_subject_person', 'work_subject_corporate_body',
-                 'work_subject_event', 'work_subject', 'work_subject_place', 'work_subject_time', 'work_subject_domain',
-                 'work_subject_work', 'popularity_join', 'modificationTime', 'stat_digital', 'work_publisher_work',
-                 'metadata_source', 'work_main_creator_index', 'stat_item_count', 'stat_digital_library_count',
-                 'stat_library_count', 'stat_materialization_count', 'stat_public_domain', 'expression_ids',
-                 'materialization_ids', 'item_ids', 'suggest', 'phrase_suggest',
-                 'title_with_nonf_chars']
-
-    def __init__(self):
-        self.uuid = uuid4()
-        self.mock_es_id = int()
-
-        # creators for frbrization process
-        self.main_creator = set()
-        self.other_creator = set()
+class FinalWork(object):
+    def __init__(self,
+                 frbr_cluster: FRBRCluster):
+        self.frbr_cluster = frbr_cluster
 
         # creators for record real metadata
         self.main_creator_real = set()
+        self.other_creator_real = set()
 
         self.titles240 = set()
         self.titles245 = {}
@@ -66,11 +43,6 @@ class Work(object):
         self.language_orig_obj = None
 
         self.pub_country_codes = set()
-
-        self.expressions_dict = {}
-
-        self.manifestations_bn_ids = set()
-        self.manifestations_mak_ids = set()
 
         self.libraries = []
 
@@ -137,10 +109,8 @@ class Work(object):
 
         # invariable data
         self.popularity_join = "owner"
-        self.modificationTime = "2019-10-01T13:34:23.580"
         self.stat_digital = False
         self.work_publisher_work = False
-        self.metadata_source = 'REFERENCE'
 
         # helper data
         self.work_main_creator_index = []
@@ -163,13 +133,30 @@ class Work(object):
         self.phrase_suggest = []
 
     def __repr__(self):
-        return f'Work(id={self.uuid}, title_pref={self.work_title_pref}, children={self.expressions_dict.values()}'
+        return f'FinalWork(id={self.frbr_cluster.uuid}, title_pref={self.work_title_pref})'
 
-    def get_manifestation_bn_id(self, bib_object):
-        self.manifestations_bn_ids.add(get_values_by_field(bib_object, '001')[0])
+    def join_and_calculate_pure_work_attributes(self,
+                                                resolver_cache: dict):
+        for work_data_object in self.frbr_cluster.work_data_by_raw_record_id.values():
 
-    def create_mock_es_data_index_id(self):
-        self.mock_es_id = str(esid.WORK_PREFIX + str(list(self.manifestations_bn_ids)[0][1:]))
+            self.work_udc.update(work_data_object.work_udc)
+
+            # join and calculate subject data
+            self.work_subject_person.update(work_data_object.work_subject_person)
+            self.work_subject_corporate_body.update(work_data_object.work_subject_corporate_body)
+            self.work_subject_event.update(work_data_object.work_subject_event)
+            self.work_subject.update(work_data_object.work_subject)
+            self.work_subject_place.update(work_data_object.work_subject_place)
+            self.work_subject_time = [] #TODO
+            self.work_subject_work = [] #TODO
+
+            # join and calculate other descriptor related data
+            self.work_genre.update(work_data_object.work_genre)
+            self.work_subject_domain.update(work_data_object.work_subject_domain)
+            self.work_form.update(work_data_object.work_form)
+            self.work_cultural_group.update(work_data_object.work_cultural_group)
+
+
 
     # 3.1.1
     def get_main_creator(self, bib_object, descr_index):
@@ -510,292 +497,6 @@ class Work(object):
     def merge_manif_bn_ids(self, matched_work):
         matched_work.manifestations_bn_ids.update(self.manifestations_bn_ids)
 
-    def match_with_existing_work_and_index(self, works_by_uuid, works_by_titles):
-        candidate_works_by_245_title = {}
-        candidate_works_by_246_title_orig = {}
-        candidate_works_by_246_title_other = {}
-        candidate_works_by_240_title = {}
-
-        for title_dict in self.titles245.values():
-            for title in title_dict.keys():
-                # no such title - append empty list
-                normalized_title = prepare_name_for_indexing(normalize_title(title))
-                if normalized_title not in works_by_titles:
-                    candidate_works_by_245_title.setdefault(title, [])
-                # title found - append candidate uuids
-                else:
-                    candidate_works_by_245_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        for title_dict in self.titles246_title_orig.values():
-            for title in title_dict.keys():
-                # no such title - append empty list
-                normalized_title = prepare_name_for_indexing(normalize_title(title))
-                if normalized_title not in works_by_titles:
-                    candidate_works_by_246_title_orig.setdefault(title, [])
-                # title found - append candidate uuids
-                else:
-                    candidate_works_by_246_title_orig.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        for title in self.titles246_title_other.keys():
-            # no such title - append empty list
-            normalized_title = prepare_name_for_indexing(normalize_title(title))
-            if normalized_title not in works_by_titles:
-                candidate_works_by_246_title_other.setdefault(title, [])
-            # title found - append candidate uuids
-            else:
-                candidate_works_by_246_title_other.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        for title in list(self.titles240):
-            # no such title - append empty list
-            normalized_title = prepare_name_for_indexing(normalize_title(title))
-            if normalized_title not in works_by_titles:
-                candidate_works_by_240_title.setdefault(title, [])
-            # title found - append candidate uuids
-            else:
-                candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        matched_uuids = set()
-
-        if candidate_works_by_245_title:
-            for title, uuids_list in candidate_works_by_245_title.items():
-                for uuid in uuids_list:
-                    candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator:
-                        if candidate_work.main_creator & self.main_creator:
-                            matched_uuids.add(uuid)
-                    if candidate_work.other_creator:
-                        if candidate_work.other_creator == self.other_creator:
-                            matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator \
-                            and not self.main_creator and not self.other_creator:
-                        matched_uuids.add(uuid)
-
-        if candidate_works_by_246_title_orig:
-            for title, uuids_list in candidate_works_by_246_title_orig.items():
-                for uuid in uuids_list:
-                    candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator:
-                        if candidate_work.main_creator & self.main_creator:
-                            matched_uuids.add(uuid)
-                    if candidate_work.other_creator:
-                        if candidate_work.other_creator == self.other_creator:
-                            matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator \
-                            and not self.main_creator and not self.other_creator:
-                        matched_uuids.add(uuid)
-
-        if candidate_works_by_240_title:
-            for title, uuids_list in candidate_works_by_240_title.items():
-                for uuid in uuids_list:
-                    candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator:
-                        if candidate_work.main_creator & self.main_creator:
-                            matched_uuids.add(uuid)
-                    if candidate_work.other_creator:
-                        if candidate_work.other_creator == self.other_creator:
-                            matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator \
-                            and not self.main_creator and not self.other_creator:
-                        matched_uuids.add(uuid)
-
-        if candidate_works_by_246_title_other:
-            for title, uuids_list in candidate_works_by_246_title_other.items():
-                for uuid in uuids_list:
-                    candidate_work = works_by_uuid.get(uuid)
-                    if candidate_work.main_creator:
-                        if candidate_work.main_creator & self.main_creator:
-                            matched_uuids.add(uuid)
-                    if candidate_work.other_creator:
-                        if candidate_work.other_creator == self.other_creator:
-                            matched_uuids.add(uuid)
-                    if not candidate_work.main_creator and not candidate_work.other_creator \
-                            and not self.main_creator and not self.other_creator:
-                        matched_uuids.add(uuid)
-
-        matched_uuids = list(matched_uuids)
-
-        # no candidates found - new work to add
-        if len(matched_uuids) == 0:
-            # index new work by titles and by uuid
-            for title_dict in self.titles245.values():
-                for title in title_dict.keys():
-                    works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
-            for title_dict in self.titles246_title_orig.values():
-                for title in title_dict.keys():
-                    works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
-            for title in self.titles240:
-                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
-            for title in self.titles246_title_other.keys():
-                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(self.uuid)
-
-            works_by_uuid.setdefault(self.uuid, self)
-            #print('Added new work.')
-
-        # one candidate found - merge with existing work and index by all titles
-        if len(matched_uuids) == 1:
-            matched_work = works_by_uuid.get(matched_uuids[0])
-            self.merge_titles(matched_work)
-            self.merge_manif_bn_ids(matched_work)
-            self.index_matched_work_by_titles(matched_work, works_by_titles)
-            #print('One candidate found - merged works.')
-
-        # more than one candidate found
-        if len(matched_uuids) > 1:
-            matched_work = works_by_uuid.get(matched_uuids[0])
-            self.merge_titles(matched_work)
-            self.merge_manif_bn_ids(matched_work)
-            self.index_matched_work_by_titles(matched_work, works_by_titles)
-            #print(f'{len(matched_uuids)} candidates found, merged with first one.')
-
-    def try_to_merge_possible_duplicates_using_broader_context(self, works_by_uuid, works_by_titles):
-        candidate_works_by_245_title = {}
-        candidate_works_by_246_title_orig = {}
-        candidate_works_by_246_title_other = {}
-        candidate_works_by_240_title = {}
-
-        for title_dict in self.titles245.values():
-            for title in title_dict.keys():
-                # no such title - append empty list
-                normalized_title = prepare_name_for_indexing(normalize_title(title))
-                if normalized_title not in works_by_titles:
-                    candidate_works_by_245_title.setdefault(title, [])
-                # title found - append candidate uuids
-                else:
-                    candidate_works_by_245_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        for title_dict in self.titles246_title_orig.values():
-            for title in title_dict.keys():
-                normalized_title = prepare_name_for_indexing(normalize_title(title))
-                # no such title - append empty list
-                if normalized_title not in works_by_titles:
-                    candidate_works_by_246_title_orig.setdefault(title, [])
-                # title found - append candidate uuids
-                else:
-                    candidate_works_by_246_title_orig.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        for title in self.titles246_title_other.keys():
-            # no such title - append empty list
-            normalized_title = prepare_name_for_indexing(normalize_title(title))
-            if normalized_title not in works_by_titles:
-                candidate_works_by_246_title_other.setdefault(title, [])
-            # title found - append candidate uuids
-            else:
-                candidate_works_by_246_title_other.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        for title in list(self.titles240):
-            # no such title - append empty list
-            normalized_title = prepare_name_for_indexing(normalize_title(title))
-            if normalized_title not in works_by_titles:
-                candidate_works_by_240_title.setdefault(title, [])
-            # title found - append candidate uuids
-            else:
-                candidate_works_by_240_title.setdefault(title, []).extend(works_by_titles.get(normalized_title))
-
-        matched_uuids = set()
-
-        if candidate_works_by_245_title:
-            for title, uuids_list in candidate_works_by_245_title.items():
-                for uuid in uuids_list:
-                    if uuid != self.uuid:
-                        candidate_work = works_by_uuid.get(uuid)
-                        if candidate_work:
-                            if candidate_work.main_creator:
-                                if candidate_work.main_creator & self.main_creator:
-                                    matched_uuids.add(uuid)
-                            if candidate_work.other_creator:
-                                if candidate_work.other_creator == self.other_creator:
-                                    matched_uuids.add(uuid)
-                            if not candidate_work.main_creator and not candidate_work.other_creator \
-                                    and not self.main_creator and not self.other_creator:
-                                matched_uuids.add(uuid)
-
-        if candidate_works_by_246_title_orig:
-            for title, uuids_list in candidate_works_by_246_title_orig.items():
-                for uuid in uuids_list:
-                    if uuid != self.uuid:
-                        candidate_work = works_by_uuid.get(uuid)
-                        if candidate_work:
-                            if candidate_work.main_creator:
-                                if candidate_work.main_creator & self.main_creator:
-                                    matched_uuids.add(uuid)
-                            if candidate_work.other_creator:
-                                if candidate_work.other_creator == self.other_creator:
-                                    matched_uuids.add(uuid)
-                            if not candidate_work.main_creator and not candidate_work.other_creator \
-                                    and not self.main_creator and not self.other_creator:
-                                matched_uuids.add(uuid)
-
-        if candidate_works_by_240_title:
-            for title, uuids_list in candidate_works_by_240_title.items():
-                for uuid in uuids_list:
-                    if uuid != self.uuid:
-                        candidate_work = works_by_uuid.get(uuid)
-                        if candidate_work:
-                            if candidate_work.main_creator:
-                                if candidate_work.main_creator & self.main_creator:
-                                    matched_uuids.add(uuid)
-                            if candidate_work.other_creator:
-                                if candidate_work.other_creator == self.other_creator:
-                                    matched_uuids.add(uuid)
-                            if not candidate_work.main_creator and not candidate_work.other_creator \
-                                    and not self.main_creator and not self.other_creator:
-                                matched_uuids.add(uuid)
-
-        if candidate_works_by_246_title_other:
-            for title, uuids_list in candidate_works_by_246_title_other.items():
-                for uuid in uuids_list:
-                    if uuid != self.uuid:
-                        candidate_work = works_by_uuid.get(uuid)
-                        if candidate_work:
-                            if candidate_work.main_creator:
-                                if candidate_work.main_creator & self.main_creator:
-                                    matched_uuids.add(uuid)
-                            if candidate_work.other_creator:
-                                if candidate_work.other_creator == self.other_creator:
-                                    matched_uuids.add(uuid)
-                            if not candidate_work.main_creator and not candidate_work.other_creator \
-                                    and not self.main_creator and not self.other_creator:
-                                matched_uuids.add(uuid)
-
-        matched_uuids = list(matched_uuids)
-
-        # one candidate found - merge with existing work and delete duplicate (only in indexed works by uuid)
-        if len(matched_uuids) == 1 and matched_uuids[0] != self.uuid:
-            matched_work = works_by_uuid.get(matched_uuids[0])
-            if matched_work:
-                #print(
-                    #f'{self.titles245} | {self.titles246_title_orig} | {self.titles246_title_other} | {self.titles240}')
-                #print(f'{self.main_creator} | {self.other_creator}')
-                #print(
-                    #f'{matched_work.titles245} | {matched_work.titles246_title_orig} | {matched_work.titles246_title_other} | {matched_work.titles240}')
-                #print(f'{matched_work.main_creator} | {matched_work.other_creator}')
-                self.merge_titles(matched_work)
-                self.merge_manif_bn_ids(matched_work)
-                #print('Merged works using broader context!')
-
-                return True
-
-        # more than one candidate found
-        if len(matched_uuids) > 1:
-            #print(f'{len(matched_uuids)} candidates found using broader context.')
-
-            return False
-
-        # no candidates found - there is no duplicate
-        return False
-
-    @staticmethod
-    def index_matched_work_by_titles(matched_work, works_by_titles):
-        for title_dict in matched_work.titles245.values():
-            for title in title_dict.keys():
-                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
-        for title_dict in matched_work.titles246_title_orig.values():
-            for title in title_dict.keys():
-                works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
-        for title in matched_work.titles240:
-            works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
-        for title in matched_work.titles246_title_other.keys():
-            works_by_titles.setdefault(prepare_name_for_indexing(normalize_title(title)), set()).add(matched_work.uuid)
 
     def get_pub_country(self, bib_object):
         pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
@@ -879,146 +580,121 @@ class Work(object):
         only_values_from_list_710 = only_values(resolved_list_710)
         self.filter_publisher_uniform.update(only_values_from_list_710)
 
-    def convert_to_work(self, manifestations_bn_by_id, buffer, descr_index, code_val_index):
-        self.create_mock_es_data_index_id()
-
-        # get values from all reference manifestations
-        for m_id in self.manifestations_bn_ids:
-
-            # get manifestation by bn id from the index and read it (they're stored as iso binary)
-            bib_object = read_marc_from_binary(manifestations_bn_by_id.get(m_id))
-
-            # get simple attributes, without relations to descriptors
-            self.work_udc.update(get_values_by_field_and_subfield(bib_object, ('080', ['a'])))
-            self.get_language_of_original(bib_object)
-            self.get_languages(bib_object)
-            self.get_pub_country(bib_object)
-
-            # check if manifestation is catalogued using DBN - if so, get subject and genre data
-            if is_dbn(bib_object):
-
-                self.work_subject_person.update(resolve_field_value(
-                    get_values_by_field_and_subfield(bib_object, ('600', ['a', 'b', 'c', 'd'])), descr_index))
-                self.work_subject_corporate_body.update(resolve_field_value(
-                    get_values_by_field_and_subfield(bib_object, ('610', ['a', 'b', 'c', 'd', 'n', 'p'])), descr_index))
-                self.work_subject_event.update(resolve_field_value(
-                    get_values_by_field_and_subfield(bib_object, ('611', ['a', 'b', 'c', 'd', 'n', 'p'])), descr_index))
-                self.work_subject.update(resolve_field_value(
-                    get_values_by_field_and_subfield(bib_object, ('650', ['a', 'b', 'c', 'd'])), descr_index))
-                self.work_subject_place.update(resolve_field_value(
-                    get_values_by_field_and_subfield(bib_object, ('651', ['a', 'b', 'c', 'd'])), descr_index))
-                self.work_subject_time = []
-                self.work_subject_work = []
-                self.work_genre.update(resolve_field_value(
-                    get_values_by_field_and_subfield(bib_object, ('655', ['a', 'b', 'c', 'd'])), descr_index))
-
-            # get other data related to descriptors
-            self.work_subject_domain.update(resolve_field_value(
-                get_values_by_field_and_subfield(bib_object, ('658', ['a'])), descr_index))
-            self.work_form.update(resolve_field_value(
-                get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
-            self.work_cultural_group.update(resolve_field_value(
-                get_values_by_field_and_subfield(bib_object, ('386', ['a'])), descr_index))
-
-            # get creators and creators for presentation
-            self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
-            self.work_main_creator_index = []  # todo
-            self.work_other_creator_index = []  # todo
-
-            if len(list(self.main_creator_real)) > 1:
-                self.work_presentation_main_creator = select_number_of_creators(self.work_main_creator,
-                                                                                cr_num_end=1)
-                self.work_presentation_another_creator = select_number_of_creators(self.work_main_creator,
-                                                                                   cr_num_start=1)
-            else:
-                if self.main_creator_real:
-                    self.work_presentation_main_creator = self.work_main_creator
-                    self.work_presentation_another_creator = []
-                else:
-                    self.work_presentation_main_creator = []
-                    self.work_presentation_another_creator = []
-
-            self.work_time_created = []  # todo
-            self.work_title_index = []  # todo
-
-            # get data and create attributes for search indexes
-            self.search_adress.update(get_values_by_field(bib_object, '260'))
-
-            self.search_identity.update(get_values_by_field_and_subfield(bib_object, ('035', ['a'])))
-            self.search_identity.update(get_values_by_field_and_subfield(bib_object, ('020', ['a'])))
-            self.search_identity.update(get_values_by_field(bib_object, '001'))
-
-            creators_from_manif = self.get_creators_from_manif(bib_object, descr_index)
-            self.search_authors.update(serialize_to_list_of_values(self.main_creator_real))
-            self.search_authors.update(creators_from_manif)
-
-            self.search_note.update(get_values_by_field(bib_object, '500'))
-
-            self.search_subject.update(*[only_values(res_val_list) for res_val_list in
-                                         [self.work_subject, self.work_subject_place, self.work_subject_domain,
-                                          self.work_subject_corporate_body, self.work_subject_person,
-                                          self.work_subject_time, self.work_subject_event]])
-
-            self.search_formal.update(*[only_values(res_val_list) for res_val_list in
-                                        [self.work_cultural_group, self.work_genre]])
-
-            self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0'))
-            self.filter_publisher.update(self.get_publishers_all(bib_object))
-            self.get_uniform_publishers(bib_object, descr_index)
-            self.filter_creator.update(creators_from_manif)
-
-
-            # that is quite tricky part: upsert_expression method not only instantiates and upserts expression object
-            # (basing on the manifestation data), but also instantiates manifestation object and item object(s),
-            # creates expression ids, manifestation ids and item ids
-            self.upsert_expression(bib_object, buffer, descr_index, code_val_index)
-
-        # attributes below can be calculated AFTER getting data from all manifestations
-        self.calculate_lang_orig()
-        self.calculate_title_of_orig_pref()
-        self.calculate_title_pref()
-
-        self.get_titles_of_orig_alt()
-        self.get_titles_alt()
-
-        self.language_orig_obj = resolve_code_and_serialize([self.language_orig], 'language_dict', code_val_index)
-
-        # calculate filter indexes
-        self.filter_lang.extend(resolve_code(list(self.language_codes), 'language_dict', code_val_index))
-        self.filter_lang_orig.extend(resolve_code(list(self.language_of_orig_codes.keys()), 'language_dict',
-                                                  code_val_index))
-        self.filter_creator.update(serialize_to_list_of_values(self.main_creator_real))
-        self.filter_nat_bib_code = []  # todo
-        self.filter_nat_bib_year = []  # todo
-        self.filter_pub_country.extend(resolve_code(list(self.pub_country_codes), 'country_dict', code_val_index))
-        self.filter_form.extend(only_values(self.work_form))
-        self.filter_cultural_group.extend(only_values(self.work_cultural_group))
-        self.filter_subject.extend(only_values(self.work_subject))
-        self.filter_subject.extend(only_values(self.work_subject_person))
-        self.filter_subject.extend(only_values(self.work_subject_corporate_body))
-        self.filter_subject.extend(only_values(self.work_subject_event))
-        self.filter_subject.extend(only_values(self.work_subject_work))
-        self.filter_subject_place.extend(only_values(self.work_subject_place))
-        self.filter_subject_time = []  # todo
-        self.filter_time_created = []  # todo
-
-        self.search_form.update(self.filter_form)
-        self.search_form.update(only_values(self.work_genre))
-
-        self.search_title.add(self.work_title_of_orig_pref)
-        self.search_title.update(self.work_title_of_orig_alt)
-        self.search_title.add(self.work_title_pref)
-        self.search_title.update(self.work_title_alt)
-
-        # get creator for sorting
-        if self.main_creator:
-            self.sort_author = list(serialize_to_list_of_values(self.main_creator))[0]
-        if self.other_creator:
-            self.sort_author = list(serialize_to_list_of_values(self.other_creator))[0]
-
-        # get data for suggestions
-        self.suggest = [self.work_title_pref]  # todo
-        self.phrase_suggest = [self.work_title_pref]  # todo
+    # def convert_to_work(self, manifestations_bn_by_id, buffer, descr_index, code_val_index):
+    #         # get simple attributes, without relations to descriptors
+    #         self.work_udc.update(get_values_by_field_and_subfield(bib_object, ('080', ['a'])))
+    #         self.get_language_of_original(bib_object)
+    #         self.get_languages(bib_object)
+    #         self.get_pub_country(bib_object)
+    #
+    #
+    #
+    #
+    #         # get other data related to descriptors
+    #         self.work_subject_domain.update(resolve_field_value(
+    #             get_values_by_field_and_subfield(bib_object, ('658', ['a'])), descr_index))
+    #         self.work_form.update(resolve_field_value(
+    #             get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
+    #         self.work_cultural_group.update(resolve_field_value(
+    #             get_values_by_field_and_subfield(bib_object, ('386', ['a'])), descr_index))
+    #
+    #         # get creators and creators for presentation
+    #         self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
+    #
+    #         if len(list(self.main_creator_real)) > 1:
+    #             self.work_presentation_main_creator = select_number_of_creators(self.work_main_creator,
+    #                                                                             cr_num_end=1)
+    #             self.work_presentation_another_creator = select_number_of_creators(self.work_main_creator,
+    #                                                                                cr_num_start=1)
+    #         else:
+    #             if self.main_creator_real:
+    #                 self.work_presentation_main_creator = self.work_main_creator
+    #                 self.work_presentation_another_creator = []
+    #             else:
+    #                 self.work_presentation_main_creator = []
+    #                 self.work_presentation_another_creator = []
+    #
+    #         self.work_time_created = []  # todo
+    #         self.work_title_index = []  # todo
+    #
+    #         # get data and create attributes for search indexes
+    #         self.search_adress.update(get_values_by_field(bib_object, '260'))
+    #
+    #         self.search_identity.update(get_values_by_field_and_subfield(bib_object, ('035', ['a'])))
+    #         self.search_identity.update(get_values_by_field_and_subfield(bib_object, ('020', ['a'])))
+    #         self.search_identity.update(get_values_by_field(bib_object, '001'))
+    #
+    #         creators_from_manif = self.get_creators_from_manif(bib_object, descr_index)
+    #         self.search_authors.update(serialize_to_list_of_values(self.main_creator_real))
+    #         self.search_authors.update(creators_from_manif)
+    #
+    #         self.search_note.update(get_values_by_field(bib_object, '500'))
+    #
+    #         self.search_subject.update(*[only_values(res_val_list) for res_val_list in
+    #                                      [self.work_subject, self.work_subject_place, self.work_subject_domain,
+    #                                       self.work_subject_corporate_body, self.work_subject_person,
+    #                                       self.work_subject_time, self.work_subject_event]])
+    #
+    #         self.search_formal.update(*[only_values(res_val_list) for res_val_list in
+    #                                     [self.work_cultural_group, self.work_genre]])
+    #
+    #         self.filter_pub_date.add(get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0'))
+    #         self.filter_publisher.update(self.get_publishers_all(bib_object))
+    #         self.get_uniform_publishers(bib_object, descr_index)
+    #         self.filter_creator.update(creators_from_manif)
+    #
+    #
+    #         # that is quite tricky part: upsert_expression method not only instantiates and upserts expression object
+    #         # (basing on the manifestation data), but also instantiates manifestation object and item object(s),
+    #         # creates expression ids, manifestation ids and item ids
+    #         self.upsert_expression(bib_object, buffer, descr_index, code_val_index)
+    #
+    #     # attributes below can be calculated AFTER getting data from all manifestations
+    #     self.calculate_lang_orig()
+    #     self.calculate_title_of_orig_pref()
+    #     self.calculate_title_pref()
+    #
+    #     self.get_titles_of_orig_alt()
+    #     self.get_titles_alt()
+    #
+    #     self.language_orig_obj = resolve_code_and_serialize([self.language_orig], 'language_dict', code_val_index)
+    #
+    #     # calculate filter indexes
+    #     self.filter_lang.extend(resolve_code(list(self.language_codes), 'language_dict', code_val_index))
+    #     self.filter_lang_orig.extend(resolve_code(list(self.language_of_orig_codes.keys()), 'language_dict',
+    #                                               code_val_index))
+    #     self.filter_creator.update(serialize_to_list_of_values(self.main_creator_real))
+    #     self.filter_nat_bib_code = []  # todo
+    #     self.filter_nat_bib_year = []  # todo
+    #     self.filter_pub_country.extend(resolve_code(list(self.pub_country_codes), 'country_dict', code_val_index))
+    #     self.filter_form.extend(only_values(self.work_form))
+    #     self.filter_cultural_group.extend(only_values(self.work_cultural_group))
+    #     self.filter_subject.extend(only_values(self.work_subject))
+    #     self.filter_subject.extend(only_values(self.work_subject_person))
+    #     self.filter_subject.extend(only_values(self.work_subject_corporate_body))
+    #     self.filter_subject.extend(only_values(self.work_subject_event))
+    #     self.filter_subject.extend(only_values(self.work_subject_work))
+    #     self.filter_subject_place.extend(only_values(self.work_subject_place))
+    #     self.filter_subject_time = []  # todo
+    #     self.filter_time_created = []  # todo
+    #
+    #     self.search_form.update(self.filter_form)
+    #     self.search_form.update(only_values(self.work_genre))
+    #
+    #     self.search_title.add(self.work_title_of_orig_pref)
+    #     self.search_title.update(self.work_title_of_orig_alt)
+    #     self.search_title.add(self.work_title_pref)
+    #     self.search_title.update(self.work_title_alt)
+    #
+    #     # get creator for sorting
+    #     if self.main_creator:
+    #         self.sort_author = list(serialize_to_list_of_values(self.main_creator))[0]
+    #     if self.other_creator:
+    #         self.sort_author = list(serialize_to_list_of_values(self.other_creator))[0]
+    #
+    #     # get data for suggestions
+    #     self.suggest = [self.work_title_pref]  # todo
+    #     self.phrase_suggest = [self.work_title_pref]  # todo
 
     def get_expr_manif_item_ids_and_counts(self):
         lib_ids = set()

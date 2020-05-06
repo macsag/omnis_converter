@@ -11,8 +11,6 @@ from commons.json_writer import write_to_json
 from descriptor_resolver.resolve_record import resolve_field_value, resolve_code_and_serialize, only_values
 from manifestation_matcher.manif_matcher import get_data_for_matching
 
-from objects.item import BnItem, PolonaItem
-
 import config.mock_es_id_prefixes as esid
 
 
@@ -67,6 +65,20 @@ class FRBRManifestation(object):
         manifestation_match_data_byte_array.extend(repr(sorted(mmd.edition)).encode('utf-8'))
 
         return sha1(manifestation_match_data_byte_array).hexdigest()
+
+
+class FinalManifestation(object):
+    def __init__(self,
+                 work_id,
+                 expression_id,
+                 item_mat_id,
+                 frbr_manifestation):
+
+        self.work_ids = [work_id]
+        self.expression_ids = [expression_id]
+        self.item_mat_id = item_mat_id
+        self.library = None
+        self.frbr_manifestation = frbr_manifestation
 
 
 class Manifestation(object):

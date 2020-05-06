@@ -29,22 +29,33 @@ def produce_frbr_cluster_from_single_work(pymarc_object: Record) -> Optional[FRB
     frbr_cluster.get_raw_record_id(pymarc_object)
 
     try:
-        frbr_cluster.get_main_creator(pymarc_object)
-    except oe.TooMany1xxFields:
+        frbr_cluster.get_main_creator_nlp_id(pymarc_object)
+    except (oe.TooMany1xxFields, oe.DescriptorNotResolved):
         return None
 
-    frbr_cluster.get_other_creator(pymarc_object)
+    try:
+        frbr_cluster.get_other_creator_nlp_id(pymarc_object)
+    except oe.DescriptorNotResolved:
+        return None
 
     try:
         frbr_cluster.get_titles(pymarc_object)
     except (oe.TooMany245Fields, oe.No245FieldFound):
         return None
 
-    frbr_cluster.get_expression_distinctive_tuple(pymarc_object)
+    try:
+        frbr_cluster.get_expression_distinctive_tuple(pymarc_object)
+    except oe.DescriptorNotResolved:
+        return None
 
-    frbr_cluster.get_sha_1_of_work_match_data()
-    frbr_cluster.get_sha_1_of_expression_match_data()
-    frbr_cluster.get_work_data_from_single_work_record(pymarc_object)
+    frbr_cluster.get_sha_1_of_work_match_data_nlp_id()
+    frbr_cluster.get_sha_1_of_expression_match_data_nlp_id()
+
+    try:
+        frbr_cluster.get_work_data_from_single_work_record(pymarc_object)
+    except (oe.DescriptorNotResolved, oe.No008FieldFound):
+        return None
+
     frbr_cluster.get_expression_data_from_single_work_record(pymarc_object)
 
     return frbr_cluster

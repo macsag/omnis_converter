@@ -6,9 +6,12 @@ from uuid import uuid4
 from hashlib import sha1
 
 import redis
+from pymarc import Record
+
+import exceptions.exceptions as oe
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.validators import is_number_of_1xx_fields_valid, is_field_245_valid
+from commons.validators import is_number_of_1xx_fields_valid, is_field_245_valid, is_fields_1xx_present
 from commons.normalization import prepare_name_for_indexing, normalize_title
 
 from objects.expression import FRBRExpression
@@ -28,10 +31,15 @@ class FRBRCluster(object):
                  'main_creator',
                  'other_creator',
                  'titles',
+                 'main_creator_nlp_id',
+                 'other_creator_nlp_id',
+                 'work_match_data_sha_1_nlp_id',
                  'work_match_data_sha_1',
                  'expression_distinctive_tuple_from_original_raw_record',
                  'expression_match_data_sha_1',
+                 'expression_match_data_sha_1_nlp_id',
                  'expressions_by_distinctive_tuple',
+                 'expression_distinctive_tuple_from_original_raw_record_nlp_id',
                  'manifestation_from_original_raw_record',
                  'original_raw_record_id',
                  'work_data_by_raw_record_id',
@@ -51,11 +59,19 @@ class FRBRCluster(object):
         self.other_creator = {}
         self.titles = {}
 
+        self.main_creator_nlp_id = {}
+        self.other_creator_nlp_id = {}
+
         self.work_match_data_sha_1 = None
+        self.work_match_data_sha_1_nlp_id = None
 
         # expression matching
         self.expression_distinctive_tuple_from_original_raw_record = None
+        self.expression_distinctive_tuple_from_original_raw_record_nlp_id = None
+
         self.expression_match_data_sha_1 = None
+        self.expression_match_data_sha_1_nlp_id = None
+
         self.expressions_by_distinctive_tuple = {}
 
         # manifestation creation
@@ -83,6 +99,7 @@ class FRBRCluster(object):
                f'title={list(self.titles.keys())[0]})'
 
     # 3.1.1
+    # DEPRECATED
     def get_main_creator(self, bib_object):
         # get lists of 1XX fields from parsed raw record
         list_val_100abcd = get_values_by_field_and_subfield(bib_object, ('100', ['a', 'b', 'c', 'd']))
@@ -157,7 +174,109 @@ class FRBRCluster(object):
             for main_creator in main_creators_to_add:
                 self.main_creator.setdefault(main_creator, ObjCounter()).add(1)
 
+    # preferred method to use for frbrizing - thanks to nlp_id usage, when main_creator name changes,
+    # FRBRCluster produced from updated record can still be matched with the existing one - nlp_id does not change
+    def get_main_creator_nlp_id(self, pymarc_object: Record):
+        # get lists of 1XX fields from parsed raw record
+        list_val_100_0 = get_values_by_field_and_subfield(pymarc_object, ('100', ['0']))
+        list_val_110_0 = get_values_by_field_and_subfield(pymarc_object, ('110', ['0']))
+        list_val_111_0 = get_values_by_field_and_subfield(pymarc_object, ('111', ['0']))
+
+        # validate number of 1XX fields in parsed raw record record and raise exception if record is not valid
+        # exception is handled at the analyzer level
+        is_number_of_1xx_fields_valid(list_val_100_0, list_val_110_0, list_val_111_0)
+
+        if not list_val_100_0 and not list_val_110_0 and not list_val_111_0 and is_fields_1xx_present(pymarc_object):
+            raise oe.DescriptorNotResolved
+
+        # 3.1.1.1 - there is 1XX field
+        if list_val_100_0 or list_val_110_0 or list_val_111_0:
+            if list_val_100_0:
+                self.main_creator_nlp_id.setdefault(list_val_100_0[0], ObjCounter()).add(1)
+            if list_val_110_0:
+                self.main_creator_nlp_id.setdefault(list_val_110_0[0], ObjCounter()).add(1)
+            if list_val_111_0:
+                self.main_creator_nlp_id.setdefault(list_val_111_0[0], ObjCounter()).add(1)
+
+
+        # 3.1.1.2 - if there is no 1XX field, check for 7XX
+        else:
+            list_val_700_0 = set()
+            list_val_710_0 = set()
+            list_val_711_0 = set()
+
+            main_creators_to_add = set()
+
+            list_700_fields = pymarc_object.get_fields('700')
+            if list_700_fields:
+                for field in list_700_fields:
+                    e_subflds = field.get_subfields('e')
+                    t_subflds = field.get_subfields('t')
+                    if e_subflds and not t_subflds:
+                        if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                list_val_700_0.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+                    if not e_subflds and not t_subflds:
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_700_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
+
+            main_creators_to_add.update(list_val_700_0)
+
+            list_710_fields = pymarc_object.get_fields('710')
+            if list_710_fields:
+                for field in list_710_fields:
+                    e_subflds = field.get_subfields('e')
+                    subflds_4 = field.get_subfields('4')
+                    t_subflds = field.get_subfields('t')
+                    if e_subflds and not t_subflds:
+                        if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                list_val_710_0.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+                    if not e_subflds and not subflds_4 and not t_subflds:
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_710_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
+
+            main_creators_to_add.update(list_val_710_0)
+
+            list_711_fields = pymarc_object.get_fields('711')
+            if list_711_fields:
+                for field in list_711_fields:
+                    j_subflds = field.get_subfields('j')
+                    subflds_4 = field.get_subfields('4')
+                    t_subflds = field.get_subfields('t')
+                    if j_subflds and not t_subflds:
+                        if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                list_val_711_0.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+                    if not j_subflds and not subflds_4 and not t_subflds:
+                        value_to_add = field.get_subfields('0')
+                        if value_to_add:
+                            list_val_711_0.add(value_to_add[0])
+                        else:
+                            raise oe.DescriptorNotResolved
+
+            main_creators_to_add.update(list_val_711_0)
+
+            for main_creator in main_creators_to_add:
+                self.main_creator_nlp_id.setdefault(main_creator, ObjCounter()).add(1)
+
     # 3.1.2
+    # DEPRECATED
     def get_other_creator(self, bib_object):
         if not self.main_creator:
             list_val_700abcd = set()
@@ -203,7 +322,65 @@ class FRBRCluster(object):
             other_creators_to_add.update(postprocess(prepare_name_for_indexing, list_val_711abcdn))
 
             for other_creator in other_creators_to_add:
-                self.main_creator.setdefault(other_creator, ObjCounter()).add(1)
+                self.other_creator.setdefault(other_creator, ObjCounter()).add(1)
+
+    # preferred method to use for frbrizing - thanks to nlp_id usage, when main_creator name changes,
+    # FRBRCluster produced from updated record can still be matched with the existing one - nlp_id does not change
+    def get_other_creator_nlp_id(self, pymarc_object: Record) -> None:
+        if not self.main_creator_nlp_id:
+            list_val_700_0 = set()
+            list_val_710_0 = set()
+            list_val_711_0 = set()
+
+            other_creators_to_add = set()
+
+            list_700_fields = pymarc_object.get_fields('700')
+            if list_700_fields:
+                for field in list_700_fields:
+                    e_subflds = field.get_subfields('e')
+                    if e_subflds:
+                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                list_val_700_0.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+
+            other_creators_to_add.update(list_val_700_0)
+
+            list_710_fields = pymarc_object.get_fields('710')
+            if list_710_fields:
+                for field in list_710_fields:
+                    e_subflds = field.get_subfields('e')
+                    if e_subflds:
+                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                list_val_710_0.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+
+            other_creators_to_add.update(list_val_710_0)
+
+            list_711_fields = pymarc_object.get_fields('711')
+            if list_711_fields:
+                for field in list_711_fields:
+                    j_subflds = field.get_subfields('j')
+                    if j_subflds:
+                        j_sub_joined = ' '.join(j_sub for j_sub in j_subflds)
+                        if 'Red' in j_sub_joined or 'Oprac' in j_sub_joined or 'Wybór' in j_sub_joined:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                list_val_711_0.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+
+            other_creators_to_add.update(list_val_711_0)
+
+            for other_creator in other_creators_to_add:
+                self.other_creator_nlp_id.setdefault(other_creator, ObjCounter()).add(1)
 
     # 3.1.3
     # to be able to track changes on merging, splitting and deleting FRBR clusters,
@@ -241,7 +418,7 @@ class FRBRCluster(object):
 
             titles_to_add.add(to_add)
 
-        else:
+        if val_245a_last_char != '=' and not list_val_245p:
             to_add = prepare_name_for_indexing(list_val_245ab[0])
 
             try:
@@ -275,6 +452,7 @@ class FRBRCluster(object):
         for title in titles_to_add:
             self.titles.setdefault(title, ObjCounter()).add(1)
 
+    # DEPRECATED
     def get_expression_distinctive_tuple(self, bib_object, is_multiwork=False):
         if not is_multiwork:
             list_fields_700 = bib_object.get_fields('700')
@@ -299,6 +477,61 @@ class FRBRCluster(object):
             # TODO get expressions when there is more than one work in raw record
             pass
 
+    def get_expression_distinctive_tuple_nlp_id(self, pymarc_object: Record, is_multiwork: bool = False) -> None:
+        if not is_multiwork:
+            list_fields_700 = pymarc_object.get_fields('700')
+            list_fields_710 = pymarc_object.get_fields('710')
+            list_fields_711 = pymarc_object.get_fields('711')
+
+            translators = set()
+
+            if list_fields_700:
+                for field in list_fields_700:
+                    e_subflds = field.get_subfields('e')
+                    if e_subflds:
+                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                        if 'Tł' in e_sub_joined or 'Tł.' in e_sub_joined or 'Tłumaczenie' in e_sub_joined:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                translators.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+
+            if list_fields_710:
+                for field in list_fields_710:
+                    e_subflds = field.get_subfields('e')
+                    if e_subflds:
+                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
+                        if 'Tł' in e_sub_joined or 'Tł.' in e_sub_joined or 'Tłumaczenie' in e_sub_joined:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                translators.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+
+            if list_fields_711:
+                for field in list_fields_711:
+                    j_subflds = field.get_subfields('j')
+                    if j_subflds:
+                        j_sub_joined = ' '.join(j_sub for j_sub in j_subflds)
+                        if 'Tł' in j_sub_joined or 'Tł.' in j_sub_joined or 'Tłumaczenie' in j_sub_joined:
+                            value_to_add = field.get_subfields('0')
+                            if value_to_add:
+                                translators.add(value_to_add[0])
+                            else:
+                                raise oe.DescriptorNotResolved
+
+            expr_lang = get_values_by_field(pymarc_object, '008')[0][35:38]
+            ldr6 = pymarc_object.leader[6]
+
+            expression_distinctive_tuple = (expr_lang, frozenset(sorted(translators)), ldr6)
+
+            self.expression_distinctive_tuple_from_original_raw_record_nlp_id = expression_distinctive_tuple
+        else:
+            # TODO get expressions when there is more than one work in raw record
+            pass
+
+    # DEPRECATED
     def get_sha_1_of_work_match_data(self):
         work_match_data_byte_array = bytearray()
         work_match_data_byte_array.extend(repr(sorted(self.main_creator.keys())).encode('utf-8'))
@@ -307,12 +540,28 @@ class FRBRCluster(object):
 
         self.work_match_data_sha_1 = sha1(work_match_data_byte_array).hexdigest()
 
+    def get_sha_1_of_work_match_data_nlp_id(self):
+        work_match_data_byte_array = bytearray()
+        work_match_data_byte_array.extend(repr(sorted(self.main_creator_nlp_id.keys())).encode('utf-8'))
+        work_match_data_byte_array.extend(repr(sorted(self.other_creator_nlp_id.keys())).encode('utf-8'))
+        work_match_data_byte_array.extend(repr(sorted(self.titles.keys())).encode('utf-8'))
+
+        self.work_match_data_sha_1_nlp_id = sha1(work_match_data_byte_array).hexdigest()
+
+    # DEPRECATED
     def get_sha_1_of_expression_match_data(self):
         expression_match_data_byte_array = bytearray()
         expression_match_data_byte_array.extend(
             repr(self.expression_distinctive_tuple_from_original_raw_record).encode('utf-8'))
 
         self.expression_match_data_sha_1 = sha1(expression_match_data_byte_array).hexdigest()
+
+    def get_sha_1_of_expression_match_data_nlp_id(self):
+        expression_match_data_byte_array = bytearray()
+        expression_match_data_byte_array.extend(
+            repr(self.expression_distinctive_tuple_from_original_raw_record_nlp_id).encode('utf-8'))
+
+        self.expression_match_data_sha_1_nlp_id = sha1(expression_match_data_byte_array).hexdigest()
 
     def check_changes_in_match_data(self, frbr_cluster_match_info):
         pass
@@ -672,7 +921,7 @@ class FRBRCluster(object):
                              indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis],
                              indexed_manifestations_by_uuid: Union[dict, redis.Redis],
                              pymarc_object,
-                             item_conversion_table) -> None:
+                             item_conversion_table):
 
         matched_clusters = self.match_work(indexed_frbr_clusters_by_uuid,
                                            indexed_frbr_clusters_by_titles)
@@ -692,6 +941,8 @@ class FRBRCluster(object):
             self.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
             self.index_frbr_cluster_by_uuid(indexed_frbr_clusters_by_uuid)
 
+            return [self.uuid]
+
         # there are one or more matches for this FRBRCluster stub
         else:
             print(f"Matching! - matched clusters = {len(matched_clusters)}. - {matched_clusters}")
@@ -707,10 +958,15 @@ class FRBRCluster(object):
                                                  indexed_frbr_clusters_by_titles,
                                                  indexed_frbr_clusters_by_raw_record_id)
 
-    def index_manifestation(self, indexed_manifestations_by_raw_record_id: Union[dict, redis.Redis]) -> None:
-        if type(indexed_manifestations_by_raw_record_id) == dict:
-            indexed_manifestations_by_raw_record_id[
-                self.manifestation_from_original_raw_record.raw_record_id] = self.manifestation_from_original_raw_record
+            return [cluster.uuid for cluster in matched_clusters]
+
+    def index_manifestation(self, indexed_manifestations_by_uuid: Union[dict, redis.Redis]) -> None:
+        if type(indexed_manifestations_by_uuid) == dict:
+            indexed_manifestations_by_uuid[
+                self.manifestation_from_original_raw_record.uuid] = self.manifestation_from_original_raw_record
+        else:
+            indexed_manifestations_by_uuid.set(self.manifestation_from_original_raw_record.uuid,
+                                               pickle.dumps(self.manifestation_from_original_raw_record))
 
     def rebuild_work_and_expression_data(self, new_work_data, new_expression_data):
         # rebuild work_data
