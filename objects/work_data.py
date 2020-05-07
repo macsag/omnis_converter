@@ -7,24 +7,23 @@ from commons.marc_iso_commons import is_dbn
 
 from commons.normalization import normalize_title
 
-from objects.frbr_cluster import FRBRCluster
 from objects.helper_objects import ObjCounter
 
 
 class WorkData(object):
     """
-    Class WorkData contains attributes of Work, which can be obtained directly from a raw bibliographic record.
+    Class WorkData contains attributes of FRBRWork, which can be obtained directly from a raw bibliographic record.
     Each raw record can produce one or more WorkData instances (exactly one per FRBRCluster instance).
 
     raw record -> [FRBRCluster containing WorkData, FRBRCluster containing WorkData, ...]
 
-    In final conversion all of the WorkData from one FRBRCluster is joined and FinalWork instance is produced.
+    In final conversion all of the WorkData instances from one FRBRCluster is joined and FinalWork instance is produced.
 
-    WorkData serves for splitting and joining FRBRClusters as well:
+    Some of the WorkData attributes serve for splitting and joining FRBRClusters as well:
     'main_creator_for_cluster', 'other_creator_for_cluster', 'titles_for_cluster', 'work_match_data_sha_1'
     are used in this process.
     """
-    def __init__(self, frbr_cluster: FRBRCluster, pymarc_object: Record):
+    def __init__(self, frbr_cluster, pymarc_object: Record):
         # data needed for merging and splitting FRBRClusters and deleting work_data from FRBRCluster
         self.raw_record_id = frbr_cluster.original_raw_record_id
         self.main_creator_for_cluster = frbr_cluster.main_creator_nlp_id
@@ -34,6 +33,7 @@ class WorkData(object):
         self.work_match_data_sha_1 = frbr_cluster.work_match_data_sha_1_nlp_id
 
         # helper dict of titles for control of nonfiling characters
+        # used for generating real titles for front-end
         self.title_with_nonf_chars = {}
 
         self.language_codes = set()
@@ -50,7 +50,6 @@ class WorkData(object):
         self.titles245p = set()
         self.titles246_title_orig = {}
         self.titles246_title_other = {}
-
 
         self.work_time_created = []
         self.work_form = set()
@@ -245,6 +244,9 @@ class WorkData(object):
 
                 self.title_with_nonf_chars.setdefault(to_add[int(title_245_raw_ind[1]):],
                                                       set()).add(to_add)
+            # sometimes there is invalid value in second indicator (non-numeric character)
+            # so we must catch the exception and assume, that there is no non-filing character at all
+            # thus, second indicator == 0
             except ValueError:
                 self.titles245.setdefault(lang_008,
                                           {}).setdefault(to_add,
@@ -345,42 +347,42 @@ class WorkData(object):
             self.language_orig = 'und'
 
     def get_attributes_from_pymarc_object(self, pymarc_object):
+        # get creators and titles
         self.get_main_creator_real_nlp_id(pymarc_object)
         self.get_other_creator_real_nlp_id(pymarc_object)
+        self.get_titles(pymarc_object)
 
-        # get simple attributes, without relations to descriptors
+        # get simple attributes, without relations to descriptors (literals or codes)
         self.work_udc.update(get_values_by_field_and_subfield(pymarc_object, ('080', ['a'])))
         self.get_language_of_original(pymarc_object)
         self.get_languages(pymarc_object)
 
-        # check if manifestation is catalogued using DBN - if so, get subject and genre data
+        # check if manifestation is catalogued using DBN - if so, get subject and genre data in DBN
+        # nlp_ids are used instead of preferred names
         if is_dbn(pymarc_object):
 
             self.work_subject_person.update(
-                get_values_by_field_and_subfield(pymarc_object, ('600', ['a', 'b', 'c', 'd'])))
+                get_values_by_field_and_subfield(pymarc_object, ('600', ['0'])))
             self.work_subject_corporate_body.update(
-                get_values_by_field_and_subfield(pymarc_object, ('610', ['a', 'b', 'c', 'd', 'n', 'p'])))
+                get_values_by_field_and_subfield(pymarc_object, ('610', ['0'])))
             self.work_subject_event.update(
-                get_values_by_field_and_subfield(pymarc_object, ('611', ['a', 'b', 'c', 'd', 'n', 'p'])))
+                get_values_by_field_and_subfield(pymarc_object, ('611', ['0'])))
             self.work_subject.update(
-                get_values_by_field_and_subfield(pymarc_object, ('650', ['a', 'b', 'c', 'd'])))
+                get_values_by_field_and_subfield(pymarc_object, ('650', ['0'])))
             self.work_subject_place.update(
-                get_values_by_field_and_subfield(pymarc_object, ('651', ['a', 'b', 'c', 'd'])))
+                get_values_by_field_and_subfield(pymarc_object, ('651', ['0'])))
             self.work_subject_time = []
             self.work_subject_work = []
             self.work_genre.update(
-                get_values_by_field_and_subfield(pymarc_object, ('655', ['a', 'b', 'c', 'd'])))
+                get_values_by_field_and_subfield(pymarc_object, ('655', [['0']])))
 
         # get other data related to descriptors
         self.work_subject_domain.update(
-            get_values_by_field_and_subfield(pymarc_object, ('658', ['a'])))
+            get_values_by_field_and_subfield(pymarc_object, ('658', ['0'])))
         self.work_form.update(
-            get_values_by_field_and_subfield(pymarc_object, ('380', ['a'])))
+            get_values_by_field_and_subfield(pymarc_object, ('380', ['0'])))
         self.work_cultural_group.update(
-            get_values_by_field_and_subfield(pymarc_object, ('386', ['a'])))
-
-        # get creators and creators for presentation
-        #self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
+            get_values_by_field_and_subfield(pymarc_object, ('386', ['0'])))
 
         self.work_time_created = []  # todo
 

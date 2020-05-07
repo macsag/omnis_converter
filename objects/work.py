@@ -138,7 +138,9 @@ class FinalWork(object):
     def join_and_calculate_pure_work_attributes(self,
                                                 resolver_cache: dict):
         for work_data_object in self.frbr_cluster.work_data_by_raw_record_id.values():
-
+            # join data without relations to descriptors
+            self.join_titles(work_data_object)
+            self.join_language_of_orig_codes(work_data_object)
             self.work_udc.update(work_data_object.work_udc)
 
             # join and calculate subject data
@@ -156,277 +158,38 @@ class FinalWork(object):
             self.work_form.update(work_data_object.work_form)
             self.work_cultural_group.update(work_data_object.work_cultural_group)
 
+        # now, when we have all raw attributes joined, we can calculate some atrributes
+        # order of calculations have to be retained (e.g. title_of_orig_pref needs lang_orig to be calculated first)
+        self.calculate_lang_orig()
+        self.calculate_title_of_orig_pref()
+        self.calculate_title_pref()
+        self.get_titles_of_orig_alt()
+        self.get_titles_alt()
 
-
-    # 3.1.1
-    def get_main_creator(self, bib_object, descr_index):
-        list_val_100abcd = get_values_by_field_and_subfield(bib_object, ('100', ['0']))
-        list_val_110abcdn = get_values_by_field_and_subfield(bib_object, ('110', ['0']))
-        list_val_111abcdn = get_values_by_field_and_subfield(bib_object, ('111', ['0']))
-
-        # validate number of 1XX fields in record and raise exception if not
-        is_number_of_1xx_fields_valid(list_val_100abcd, list_val_110abcdn, list_val_111abcdn)
-
-        # 3.1.1.1 - there is 1XX field [CHECKED]
-        if list_val_100abcd:
-            self.main_creator.add(list_val_100abcd[0])
-            self.main_creator_real.add(list_val_100abcd[0])
-        if list_val_110abcdn:
-            self.main_creator.add(list_val_110abcdn[0])
-            self.main_creator_real.add(list_val_110abcdn[0])
-        if list_val_111abcdn:
-            self.main_creator.add(list_val_111abcdn[0])
-            self.main_creator_real.add(list_val_111abcdn[0])
-
-        # 3.1.1.2 - if there is no 1XX field, check for 7XX [CHECKED]
-        list_val_700abcd = set()
-        list_val_710abcdn = set()
-        list_val_711abcdn = set()
-
-        list_700_fields = bib_object.get_fields('700')
-        if list_700_fields:
-            for field in list_700_fields:
-                e_subflds = field.get_subfields('e')
-                if e_subflds:
-                    if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
-                        list_val_700abcd.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-                else:
-                    list_val_700abcd.add(
-                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-
-        resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-        # only_values_from_list_700 = only_values(resolved_list_700)
-
-        if not self.main_creator:
-            self.main_creator.update(resolved_list_700)
-        self.main_creator_real.update(resolved_list_700)
-
-        list_710_fields = bib_object.get_fields('710')
-        if list_710_fields:
-            for field in list_710_fields:
-                e_subflds = field.get_subfields('e')
-                subflds_4 = field.get_subfields('4')
-                if e_subflds:
-                    if 'Autor' in e_subflds or 'Autor domniemany' in e_subflds or 'Wywiad' in e_subflds:
-                        list_val_710abcdn.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                if not e_subflds and not subflds_4:
-                    list_val_710abcdn.add(
-                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-        # only_values_from_list_710 = only_values(resolved_list_710)
-
-        if not self.main_creator:
-            self.main_creator.update(resolved_list_710)
-        self.main_creator_real.update(resolved_list_710)
-
-        list_711_fields = bib_object.get_fields('711')
-        if list_711_fields:
-            for field in list_711_fields:
-                j_subflds = field.get_subfields('j')
-                subflds_4 = field.get_subfields('4')
-                if j_subflds:
-                    if 'Autor' in j_subflds or 'Autor domniemany' in j_subflds or 'Wywiad' in j_subflds:
-                        list_val_711abcdn.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-                if not j_subflds and not subflds_4:
-                    list_val_711abcdn.add(
-                        ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-        resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-        # only_values_from_list_711 = only_values(resolved_list_711)
-
-        if not self.main_creator:
-            self.main_creator.update(resolved_list_711)
-        self.main_creator_real.update(resolved_list_711)
-
-    # 3.1.2
-    def get_other_creator(self, bib_object, descr_index):
-        if not self.main_creator:
-            list_val_700abcd = set()
-            list_val_710abcdn = set()
-            list_val_711abcdn = set()
-
-            list_700_fields = bib_object.get_fields('700')
-            if list_700_fields:
-                for field in list_700_fields:
-                    e_subflds = field.get_subfields('e')
-                    if e_subflds:
-                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
-                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
-                            list_val_700abcd.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-
-            resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-            # only_values_from_list_700 = only_values(resolved_list_700)
-
-            self.other_creator.update(resolved_list_700)
-
-            list_710_fields = bib_object.get_fields('710')
-            if list_710_fields:
-                for field in list_710_fields:
-                    e_subflds = field.get_subfields('e')
-                    if e_subflds:
-                        e_sub_joined = ' '.join(e_sub for e_sub in e_subflds)
-                        if 'Red' in e_sub_joined or 'Oprac' in e_sub_joined or 'Wybór' in e_sub_joined:
-                            list_val_710abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-            resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-            # only_values_from_list_710 = only_values(resolved_list_710)
-
-            self.other_creator.update(resolved_list_710)
-
-            list_711_fields = bib_object.get_fields('711')
-            if list_711_fields:
-                for field in list_711_fields:
-                    j_subflds = field.get_subfields('j')
-                    if j_subflds:
-                        j_sub_joined = ' '.join(j_sub for j_sub in j_subflds)
-                        if 'Red' in j_sub_joined or 'Oprac' in j_sub_joined or 'Wybór' in j_sub_joined:
-                            list_val_711abcdn.add(
-                                ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-            resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-            # only_values_from_list_711 = only_values(resolved_list_711)
-
-            self.other_creator.update(resolved_list_711)
-
-    # 3.1.3
-    def get_titles(self, bib_object):
-        # get 245 field
-        title_245_raw = bib_object.get_fields('245')
-        field_008_raw = bib_object.get_fields('008')
-
-        # validate record
-        if len(title_245_raw) > 1 or not title_245_raw:
-            raise No245FieldFoundOrTooMany245Fields
-        if not field_008_raw:
-            raise No008FieldFound
-
-        # get titles from 245 field
-        lang_008 = field_008_raw[0].value()[35:38]
-
-        list_val_245ab = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
-                                                                                             ('245', ['a', 'b'])))
-        title_245_raw_ind = title_245_raw[0].indicators
-        list_val_245a = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object,
-                                                                                            ('245', ['a'])))
-        val_245a_last_char = get_values_by_field_and_subfield(bib_object, ('245', ['a']))[0][-1]
-        list_val_245p = postprocess(normalize_title, get_values_by_field_and_subfield(bib_object, ('245', ['p'])))
-
-        if val_245a_last_char == '=' and not list_val_245p:
-            to_add = list_val_245a[0]
-
-            try:
-                self.titles245.setdefault(lang_008,
-                                          {}).setdefault(to_add[int(title_245_raw_ind[1]):],
-                                                         ObjCounter()).add(1)
-
-                self.title_with_nonf_chars.setdefault(to_add[int(title_245_raw_ind[1]):],
-                                                      set()).add(to_add)
-            except ValueError as err:
-                #print(err)
-                self.titles245.setdefault(lang_008,
-                                          {}).setdefault(to_add,
-                                                         ObjCounter()).add(1)
-
-                self.title_with_nonf_chars.setdefault(to_add,
-                                                      set()).add(to_add)
-        if list_val_245p:
-            to_add = list_val_245p[0]
-
-            self.titles245.setdefault(lang_008,
-                                      {}).setdefault(to_add,
-                                                     ObjCounter()).add(1)
-
-            self.title_with_nonf_chars.setdefault(to_add,
-                                                  set()).add(to_add)
-
-        else:
-            to_add = list_val_245ab[0]
-
-            try:
-                self.titles245.setdefault(lang_008, {}).setdefault(to_add[int(title_245_raw_ind[1]):],
-                                                                   ObjCounter()).add(1)
-
-                self.title_with_nonf_chars.setdefault(to_add[int(title_245_raw_ind[1]):],
-                                                      set()).add(to_add)
-
-            except ValueError as err:
-                #print(err)
-                self.titles245.setdefault(lang_008, {}).setdefault(to_add,
-                                                                   ObjCounter()).add(1)
-
-                self.title_with_nonf_chars.setdefault(to_add,
-                                                      set()).add(to_add)
-
-        # get titles from 246 fields
-        list_fields_246 = bib_object.get_fields('246')
-        list_val_246_title_orig = []
-        list_val_246_other = []
-
-        if list_fields_246:
-            for field in list_fields_246:
-                if field.get_subfields('i') and field.get_subfields('a', 'b'):
-                    i_value = field.get_subfields('i')[0]
-                    if 'Tyt. oryg' in i_value or 'Tytuł oryginału' in i_value:
-                        list_val_246_title_orig.append(' '.join(field.get_subfields('a', 'b')))
-                    else:
-                        list_val_246_other.append(' '.join(field.get_subfields('a', 'b')))
-                if not field.get_subfields('i') and field.get_subfields('a', 'b'):
-                    list_val_246_other.append(' '.join(field.get_subfields('a', 'b')))
-
-        list_val_246_title_orig = postprocess(normalize_title, list_val_246_title_orig)
-        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
-
-        if len(lang_041_h) == 1 and len(list_val_246_title_orig) == 1:
-            self.titles246_title_orig.setdefault(lang_041_h[0], {}).setdefault(list_val_246_title_orig[0],
-                                                                               ObjCounter()).add(1)
-
-        list_val_246_other = postprocess(normalize_title, list_val_246_other)
-        for val in list_val_246_other:
-            self.titles246_title_other.setdefault(val, ObjCounter()).add(1)
-
-        # get title from 240 field
-        title_240_raw_list = bib_object.get_fields('240')
-        if title_240_raw_list:
-            title_240_raw = title_240_raw_list[0]
-
-            list_val_240 = get_values_by_field_and_subfield(bib_object, ('240', ['a', 'b']))
-
-            try:
-                self.titles240.add(list_val_240[0][int(title_240_raw.indicators[1]):])
-
-                self.title_with_nonf_chars.setdefault(list_val_240[0][int(title_240_raw.indicators[1]):],
-                                                      set()).add(list_val_240[0])
-            except ValueError as err:
-                #print(err)
-                self.titles240.add(list_val_240[0])
-                self.title_with_nonf_chars.setdefault(list_val_240[0], set()).add(list_val_240[0])
-
-    def merge_titles(self, matched_work):
-
-        for title_lang, title_dict in self.titles245.items():
+    def join_titles(self, work_data_object):
+        for title_lang, title_dict in work_data_object.titles245.items():
             for title, title_count in title_dict.items():
-                matched_work.titles245.setdefault(title_lang, {}).setdefault(title,
-                                                                             ObjCounter()).add(title_count.count)
+                self.titles245.setdefault(title_lang,
+                                          {}).setdefault(title,
+                                                         ObjCounter()).add(title_count.count)
 
-        for title_lang, title_dict in self.titles246_title_orig.items():
+        for title_lang, title_dict in work_data_object.titles246_title_orig.items():
             for title, title_count in title_dict.items():
-                matched_work.titles246_title_orig.setdefault(title_lang,
-                                                             {}).setdefault(title,
-                                                                            ObjCounter()).add(title_count.count)
+                self.titles246_title_orig.setdefault(title_lang,
+                                                     {}).setdefault(title,
+                                                                    ObjCounter()).add(title_count.count)
 
-        for title, title_count in self.titles246_title_other.items():
-            matched_work.titles246_title_other.setdefault(title, ObjCounter()).add(title_count.count)
+        for title, title_count in work_data_object.titles246_title_other.items():
+            self.titles246_title_other.setdefault(title, ObjCounter()).add(title_count.count)
 
-        matched_work.titles240.update(self.titles240)
+        self.titles240.update(work_data_object.titles240)
 
-        for title, title_full in self.title_with_nonf_chars.items():
-            matched_work.title_with_nonf_chars.setdefault(title, set()).update(title_full)
+        for title, title_full in work_data_object.title_with_nonf_chars.items():
+            self.title_with_nonf_chars.setdefault(title, set()).update(title_full)
+
+    def join_language_of_orig_codes(self, work_data_object):
+        for lang_code, lang_count in work_data_object.language_of_orig_codes.items():
+            self.language_of_orig_codes.setdefault(lang_code, ObjCounter()).add(lang_count.count)
 
     def get_titles_of_orig_alt(self):
         for title_dict in self.titles246_title_orig.values():
@@ -465,7 +228,8 @@ class FinalWork(object):
             if orig_titles_from_245:
                 orig_titles_from_245_sorted_by_frequency = sorted(orig_titles_from_245.items(),
                                                                   key=lambda x: x[1].count)
-                self.work_title_of_orig_pref = list(self.title_with_nonf_chars.get(orig_titles_from_245_sorted_by_frequency[0][0]))[0]
+                self.work_title_of_orig_pref = list(self.title_with_nonf_chars.get(
+                    orig_titles_from_245_sorted_by_frequency[0][0]))[0]
             else:
                 for title_dict in self.titles245.values():
                     for title in title_dict.keys():
@@ -481,39 +245,11 @@ class FinalWork(object):
         if len(lang_041_h) == 1:
             self.language_of_orig_codes.setdefault(lang_041_h[0], ObjCounter()).add(1)
 
-    def get_languages(self, bib_object):
-        lang_008 = get_values_by_field(bib_object, '008')[0][35:38]
-        lang_041_h = get_values_by_field_and_subfield(bib_object, ('041', ['h']))
-
-        self.language_codes.update([lang_008])
-        self.language_codes.update(lang_041_h)
-
     def calculate_lang_orig(self):
         try:
             self.language_orig = sorted(self.language_of_orig_codes.items(), key=lambda x: x[1].count)[0][0]
         except IndexError:
             self.language_orig = 'und'
-
-    def merge_manif_bn_ids(self, matched_work):
-        matched_work.manifestations_bn_ids.update(self.manifestations_bn_ids)
-
-
-    def get_pub_country(self, bib_object):
-        pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
-        pub_008 = pub_008[:-1] if pub_008[-1] == ' ' else pub_008
-        pub_044_a = get_values_by_field_and_subfield(bib_object, ('044', ['a']))
-
-        self.pub_country_codes.update([pub_008])
-        self.pub_country_codes.update(pub_044_a)
-
-    @staticmethod
-    def get_publishers_all(bib_object):
-        pl = get_values_by_field_and_subfield(bib_object, ('260', ['b']))
-        publishers_list = postprocess(normalize_publisher, get_values_by_field_and_subfield(bib_object, ('260', ['b'])))
-
-        return publishers_list
-
-
 
     @staticmethod
     def get_creators_from_manif(bib_object, descr_index):

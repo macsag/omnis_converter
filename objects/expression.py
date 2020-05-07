@@ -13,49 +13,65 @@ import config.mock_es_id_prefixes as esid
 
 
 class FRBRExpression(object):
-    __slots__ = ['uuid', 'manifestations', 'expression_distinctive_tuple', 'expression_match_data_sha_1']
+    __slots__ = ['uuid', 'manifestations', 'expression_distinctive_tuple', 'expression_match_data_sha_1',
+                 'expression_data_by_raw_record_id']
 
-    def __init__(self, expression_distinctive_tuple, expression_match_data_sha_1):
+    def __init__(self, expression_distinctive_tuple_nlp_id,
+                 expression_match_data_sha_1_nlp_id,
+                 expression_data):
+
         self.uuid = str(uuid4())
+        self.expression_distinctive_tuple = expression_distinctive_tuple_nlp_id
+        self.expression_match_data_sha_1 = expression_match_data_sha_1_nlp_id
+
+        self.expression_data_by_raw_record_id = {expression_data.raw_record_id: expression_data}
         self.manifestations = {}
-        self.expression_distinctive_tuple = expression_distinctive_tuple
-        self.expression_match_data_sha_1 = expression_match_data_sha_1
 
     def __repr__(self):
-        return f'Expression(id={self.uuid}, expression_distinctive_tuple={self.expression_distinctive_tuple})'
+        return f'FRBRExpression(id={self.uuid}, expression_distinctive_tuple={self.expression_distinctive_tuple})'
 
 
-class Expression(object):
-    __slots__ = ['uuid', 'manifestations']
+class FinalExpression(object):
+    def __init__(self,
+                 frbr_expression,
+                 work_uuid):
+        self.frbr_expression = frbr_expression
+        self.expr_content_type = []  # TODO (but for now in ES it doesn't work as well)
+        self.expr_contributor = None  # TODO (but for now in ES it doesn't work as well)
 
-    def __init__(self):
-        self.uuid = uuid4()
-        self.manifestations = {}
-        # self.item_count = 0
-        #
-        # # attributes for expression_es_index
-        # self.mock_es_id = None
-        # self.expr_content_type = []  # todo (but for now in ES it doesn't work as well)
-        # self.expr_contributor = None  # todo (but for now in ES it doesn't work as well)
-        # self.expr_form = None
-        # self.expr_lang = None
-        # self.expr_leader_type = None
-        # self.expr_title = None
-        # self.expr_work = None
-        # self.item_ids = []
-        # self.libraries = []
-        # self.materialization_ids = []
-        # self.metadata_source = 'REFERENCE'
-        # self.modificationTime = "2019-10-01T13:34:23.580"
-        # self.phrase_suggest = ['-']
-        # self.suggest = ['-']
-        # self.work_ids = None
-        # self.stat_digital = False
-        # self.stat_digital_library_count = 0
-        # self.stat_public_domain = False
+        self.expr_form = set()
+        self.expr_lang = set()
+        self.expr_leader_type = set()
+        self.expr_title = set()
+
+        # TODO it would be nice to check, what's really used in front-end
+        self.expr_work = {'id': work_uuid, 'type': 'work', 'value': work_uuid}
+        self.work_ids = [work_uuid]
+
+        self.materialization_ids = set()
+
+        self.item_ids = set()
+        self.item_count = 0
+        self.libraries = set()
+        self.phrase_suggest = ['-']
+        self.suggest = ['-']
+
+        self.stat_digital = False
+        self.stat_digital_library_count = 0
+        self.stat_public_domain = False
 
     def __repr__(self):
-        return f'Expression(id={self.uuid}, lang={self.expr_lang})'
+        return f'FinalExpression(id={self.frbr_expression.uuid}, lang={self.expr_lang})'
+
+    def join_and_calculate_pure_expression_attributes(self,
+                                                      resolver_cache):
+
+        for expression_data_object in self.frbr_expression.expression_data_by_raw_record_id.values():
+            self.expr_form.update(expression_data_object.expr_form)
+            self.expr_lang.update(expression_data_object.expr_lang)
+            self.expr_leader_type.update(expression_data_object.expr_leader_type)
+            self.expr_title.update(expression_data_object.expr_title)
+
 
     def add(self, bib_object, work, buffer, descr_index, code_val_index):
         if not self.mock_es_id:

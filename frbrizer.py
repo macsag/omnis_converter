@@ -120,78 +120,80 @@ def main_loop(configuration: dict):
 
                 # get match_info
 
-                if not c_mc.IS_INITIAL_IMPORT:
-                    # local dict version
-                    if type(indexed_frbr_clusters_by_raw_record_id) == dict:
-                        frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
-                            frbr_cluster.original_raw_record_id)
-                    # Redis version
-                    else:
-                        frbr_cluster_match_info_raw = indexed_frbr_clusters_by_raw_record_id.get(
-                            frbr_cluster.original_raw_record_id)
-                        if frbr_cluster_match_info_raw:
-                            frbr_cluster_match_info = pickle.loads(frbr_cluster_match_info_raw)
+                if frbr_cluster:
+
+                    if not c_mc.IS_INITIAL_IMPORT:
+                        # local dict version
+                        if type(indexed_frbr_clusters_by_raw_record_id) == dict:
+                            frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
+                                frbr_cluster.original_raw_record_id)
+                        # Redis version
                         else:
-                            frbr_cluster_match_info = None
+                            frbr_cluster_match_info_raw = indexed_frbr_clusters_by_raw_record_id.get(
+                                frbr_cluster.original_raw_record_id)
+                            if frbr_cluster_match_info_raw:
+                                frbr_cluster_match_info = pickle.loads(frbr_cluster_match_info_raw)
+                            else:
+                                frbr_cluster_match_info = None
 
-                    # if record was already indexed, compare match_data
-                    if frbr_cluster_match_info:
-                        changes = frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
+                        # if record was already indexed, compare match_data
+                        if frbr_cluster_match_info:
+                            changes = frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
 
-                        # if nothing changed, rebuild work_data, expression_data and manifestation
-                        # using uuids from frbr_cluster_match_info to get frbr_cluster from database
-                        # and raw_record_id to get manifestation and data from frbr_cluster
-                        if not changes:
-                            frbr_cluster_to_rebuild_uuid = frbr_cluster_match_info.get(frbr_cluster.work_match_data_sha_1)
-                            new_work_data = frbr_cluster.work_data_by_raw_record_id.get(frbr_cluster.original_raw_record_id)
-                            new_expression_data = None # TODO
+                            # if nothing changed, rebuild work_data, expression_data and manifestation
+                            # using uuids from frbr_cluster_match_info to get frbr_cluster from database
+                            # and raw_record_id to get manifestation and data from frbr_cluster
+                            if not changes:
+                                frbr_cluster_to_rebuild_uuid = frbr_cluster_match_info.get(frbr_cluster.work_match_data_sha_1)
+                                new_work_data = frbr_cluster.work_data_by_raw_record_id.get(frbr_cluster.original_raw_record_id)
+                                new_expression_data = None # TODO
 
-                            # local dict version
-                            if type(indexed_frbr_clusters_by_uuid) == dict:
+                                # local dict version
+                                if type(indexed_frbr_clusters_by_uuid) == dict:
 
-                                # get cluster from local dict
-                                frbr_cluster_to_rebuild = indexed_frbr_clusters_by_uuid.get(frbr_cluster_to_rebuild_uuid)
-                                # rebuild work_data and expression_data
-                                frbr_cluster_to_rebuild.rebuild_work_and_expression_data(new_work_data,
-                                                                                         new_expression_data)
+                                    # get cluster from local dict
+                                    frbr_cluster_to_rebuild = indexed_frbr_clusters_by_uuid.get(frbr_cluster_to_rebuild_uuid)
+                                    # rebuild work_data and expression_data
+                                    frbr_cluster_to_rebuild.rebuild_work_and_expression_data(new_work_data,
+                                                                                             new_expression_data)
 
-                                # rebuild manifestation (data for manifestation comes from newly created frbr_cluster,
-                                # but manifestation uuid must not change, so we create manifestation and replace new uuid
-                                # with old uuid from match_info)
-                                new_manifestation = frbr_cluster.create_manifestation(pymarc_object)
-                                new_manifestation.uuid = frbr_cluster_match_info.get(
-                                    new_manifestation.manifestation_match_data_sha_1)
+                                    # rebuild manifestation (data for manifestation comes from newly created frbr_cluster,
+                                    # but manifestation uuid must not change, so we create manifestation and replace new uuid
+                                    # with old uuid from match_info)
+                                    new_manifestation = frbr_cluster.create_manifestation(pymarc_object)
+                                    new_manifestation.uuid = frbr_cluster_match_info.get(
+                                        new_manifestation.manifestation_match_data_sha_1)
 
-                                # now, when we have new manifestation, we can compare items, which were created earlier
-                                # from this raw bibliographic record - we have to be sure, that number of item records
-                                # (one record per library) and item record count (one library can have more than one volume)
+                                    # now, when we have new manifestation, we can compare items, which were created earlier
+                                    # from this raw bibliographic record - we have to be sure, that number of item records
+                                    # (one record per library) and item record count (one library can have more than one volume)
 
-                                # TODO
+                                    # TODO
 
-                            # Redis version
+                                # Redis version
+                                else:
+                                    pass # TODO
+
+                            # if something has changed, situation gets a bit complicated
+                            # since single raw record can produce more than one frbr_cluster, we've got
                             else:
                                 pass # TODO
 
-                        # if something has changed, situation gets a bit complicated
-                        # since single raw record can produce more than one frbr_cluster, we've got
-                        else:
-                            pass # TODO
+                    # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
+                    # or create and index new frbr_cluster
+                    clusters_to_send = frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
+                                                      indexed_frbr_clusters_by_titles,
+                                                      indexed_frbr_clusters_by_raw_record_id,
+                                                      indexed_manifestations_by_uuid,
+                                                      pymarc_object,
+                                                      item_conversion_table)
 
-                # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
-                # or create and index new frbr_cluster
-                clusters_to_send = frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
-                                                  indexed_frbr_clusters_by_titles,
-                                                  indexed_frbr_clusters_by_raw_record_id,
-                                                  indexed_manifestations_by_uuid,
-                                                  pymarc_object,
-                                                  item_conversion_table)
-
-                # switch for initial import (final records are built only once after matching in initial import)
-                if not c_mc.IS_INITIAL_IMPORT:
-                    # send new/modified clusters to final conversion
-                    # TODO
-                    connection_to_converter = configs['amq_conn']
-                    connection_to_converter.send('/queue/matcher-final-converter', pickle.dumps(clusters_to_send))
+                    # switch for initial import (final records are built only once after matching in initial import)
+                    if not c_mc.IS_INITIAL_IMPORT:
+                        # send new/modified clusters to final conversion
+                        # TODO
+                        connection_to_converter = configs['amq_conn']
+                        connection_to_converter.send('/queue/matcher-final-converter', pickle.dumps(clusters_to_send))
 
 
 
@@ -397,7 +399,7 @@ if __name__ == '__main__':
     c = stomp.Connection([('127.0.0.1', 61613)])
     c.connect('admin', 'admin', wait=True)
 
-    configs = {'bn_file_in': './input_files/bib_records/bn/bibs-ksiazka.marc',
+    configs = {'bn_file_in': './input_files/bib_records/bn/bibs-ksiazka-preprocessed.marc',
                'mak_files_in': './input_files/bib_records/mak',
                'inst_file_in': './input_files/institutions/manager-library.json',
                'code_val_file_in': './input_files/code_values/001_import.sql',

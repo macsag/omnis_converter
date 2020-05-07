@@ -573,8 +573,9 @@ class FRBRCluster(object):
         self.manifestation_from_original_raw_record = FRBRManifestation(self.original_raw_record_id, pymarc_object)
 
     def create_expression_and_add_manifestation(self):
-        expression_to_add = FRBRExpression(self.expression_distinctive_tuple_from_original_raw_record,
-                                           self.expression_match_data_sha_1)
+        expression_to_add = FRBRExpression(self.expression_distinctive_tuple_from_original_raw_record_nlp_id,
+                                           self.expression_match_data_sha_1_nlp_id,
+                                           self.expression_data_from_original_raw_record)
 
         self.expressions_by_distinctive_tuple.setdefault(self.expression_distinctive_tuple_from_original_raw_record,
                                                          expression_to_add.uuid)
@@ -698,6 +699,13 @@ class FRBRCluster(object):
                             manifestation_raw_record_id,
                             expression_to_merge_with_object.uuid)
 
+                    # move expression_data_by_raw_id
+                    for raw_id, expression_data in self.expressions.get(
+                            expression_uuid).expression_data_by_raw_record_id.items():
+                        expression_to_merge_with_object.expression_data_by_raw_record_id.setdefault(
+                            raw_id,
+                            expression_data)
+
                 # expression does not exist
                 # move existing expression with manifestations to existing matched frbr_cluster
                 else:
@@ -731,10 +739,14 @@ class FRBRCluster(object):
                     self.manifestation_from_original_raw_record.uuid,
                     self.manifestation_from_original_raw_record.raw_record_id)
 
+                # append new expression_data
+                expression_to_merge_with_object.expression_data_by_raw_record_id.setdefault(
+                    self.expression_data_from_original_raw_record.raw_record_id,
+                    self.expression_data_from_original_raw_record)
+
                 # create entry in lookup table (used for (re)indexing frbr_cluster by raw_record_id)
                 matched_frbr_cluster.expressions_by_raw_record_id.setdefault(
                     self.manifestation_from_original_raw_record.raw_record_id, expression_to_merge_with_object.uuid)
-
 
             # expression does not exist
             # create new expression, append new manifestation to the expression
@@ -958,7 +970,7 @@ class FRBRCluster(object):
                                                  indexed_frbr_clusters_by_titles,
                                                  indexed_frbr_clusters_by_raw_record_id)
 
-            return [cluster.uuid for cluster in matched_clusters]
+            return [cluster.uuid for cluster in matched_clusters_to_merge_with]
 
     def index_manifestation(self, indexed_manifestations_by_uuid: Union[dict, redis.Redis]) -> None:
         if type(indexed_manifestations_by_uuid) == dict:

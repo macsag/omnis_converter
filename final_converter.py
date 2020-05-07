@@ -9,6 +9,7 @@ import stomp
 
 from objects.frbr_cluster import FRBRCluster
 from objects.work import FinalWork
+from objects.expression import FinalExpression
 from objects.manifestation import FRBRManifestation, FinalManifestation
 from objects.item import FRBRItem, FinalItem
 
@@ -48,36 +49,45 @@ class FinalConverter(object):
         # start main loop - iterater over FRBRClusters
         for frbr_cluster in frbr_clusters_list:
 
-            # create FinalWork, join and calculate all "pure" work attributes (no expression, manifestation, item data)
-            final_work = FinalWork(frbr_cluster)
-            final_work.join_and_calculate_pure_work_attributes(self.resolver_cache)
-
-
             # get FRBRmanifestations and appended FRBRitems from indexed_manifestations_by_uuid
             frbr_manifestations_list = self.get_frbr_manifestations(frbr_cluster)
 
+            # create a dict with key=manifestation_uuid for fast access during iteration over expressions
+            frbr_manifestations_dict = {frbr_manifestation.uuid: frbr_manifestation for frbr_manifestation in
+                                        frbr_manifestations_list}
+
+            # create FinalWork, join and calculate all "pure" work attributes
+            # remaining "impure" attributes will be collected when iterating through expressions and manifestations
+            final_work = FinalWork(frbr_cluster)
+            final_work.join_and_calculate_pure_work_attributes(self.resolver_cache)
+
+            # iterate over expressions
+            for expression_uuid, expression_object in frbr_cluster.expressions.items():
+                final_expression = FinalExpression(expression_object, frbr_cluster.uuid)
+                final_expression.join_and_calculate_pure_expression_attributes(self.resolver_cache)
+
             # iterate over manifestations and items, build FinalItems, collect data for FinalManifestations building
             # build FinalManifestations and collect data for FinalExpressions and FinalWorks building
-            item_ids = []
+                item_ids = []
 
-            for frbr_manifestation in frbr_manifestations_list:
-                final_manifestation = FinalManifestation()
+                for frbr_manifestation in frbr_manifestations_list:
+                    final_manifestation = FinalManifestation()
 
-                for frbr_item in frbr_manifestation.items_by_institution_code.values():
-                    final_item = FinalItem(frbr_cluster.uuid,
-                                           frbr_manifestation.uuid,
-                                           frbr_item)
-                    final_item.get_single_expression_id(frbr_cluster.expressions_by_raw_record_id)
+                    for frbr_item in frbr_manifestation.items_by_institution_code.values():
+                        final_item = FinalItem(frbr_cluster.uuid,
+                                               frbr_manifestation.uuid,
+                                               frbr_item)
+                        final_item.get_single_expression_id(frbr_cluster.expressions_by_raw_record_id)
 
-                    # if FRBRManifestation contains multiple works and expression, get their ids
-                    other_work_ids, other_expression_ids = final_item.get_other_work_and_expression_ids_if_multiwork(
-                        self.indexed_frbr_clusters_by_raw_record_id)
+                        # if FRBRManifestation contains multiple works and expression, get their ids
+                        other_work_ids, other_expression_ids = final_item.get_other_work_and_expression_ids_if_multiwork(
+                            self.indexed_frbr_clusters_by_raw_record_id)
 
-                    item_ids.append(frbr_item.uuid)
+                        item_ids.append(frbr_item.uuid)
 
-                    self.resolver_cache.setdefault('institution_codes',
-                                                   {}).setdefault(frbr_item.item_local_bib_id, None)
-                    self.final_items.append(final_item)
+                        self.resolver_cache.setdefault('institution_codes',
+                                                       {}).setdefault(frbr_item.item_local_bib_id, None)
+                        self.final_items.append(final_item)
 
         # iterate over manifestations
 
