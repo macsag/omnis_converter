@@ -11,42 +11,60 @@ from commons.json_writer import write_to_json
 from descriptor_resolver.resolve_record import resolve_field_value, resolve_code_and_serialize, only_values
 from manifestation_matcher.manif_matcher import get_data_for_matching
 
-import config.mock_es_id_prefixes as esid
-
 
 class FRBRManifestation(object):
-    __slots__ = ['uuid', 'raw_record_id', 'manifestation_match_data', 'manifestation_match_data_sha_1',
-                 'mat_nlp_id', 'mat_external_id', 'mat_isbn', 'mat_carrier_type', 'mat_media_type',
-                 'mat_number_of_pages', 'mat_physical_info', 'mat_pub_city', 'mat_nat_bib', 'mat_edition',
-                 'mat_contributor', 'items_by_institution_code']
-
-    def __init__(self, raw_record_id, bib_object):
+    def __init__(self,
+                 raw_record_id,
+                 pymarc_object):
         self.uuid = str(uuid4())
         self.raw_record_id = raw_record_id
+        self.multiwork = False
 
         # manifestation_match_data
-        self.manifestation_match_data = get_data_for_matching(bib_object)
+        self.manifestation_match_data = get_data_for_matching(pymarc_object)
         self.manifestation_match_data_sha_1 = self.get_sha_1_of_manifestation_match_data()
 
         # manifestation attributes
-        self.mat_nlp_id = to_single_value(get_values_by_field(bib_object, '001'))
-        self.mat_external_id = get_values_by_field_and_subfield(bib_object, ('035', ['a']))
-        self.mat_isbn = get_values_by_field_and_subfield(bib_object, ('020', ['a']))
-        self.mat_carrier_type = get_values_by_field_and_subfield(bib_object, ('338', ['b']))
-        self.mat_media_type = get_values_by_field_and_subfield(bib_object, ('337', ['b']))
-        self.mat_number_of_pages = to_single_value(get_values_by_field_and_subfield(bib_object, ('300', ['a'])))
-        self.mat_physical_info = get_values_by_field(bib_object, '300')
-        self.mat_pub_city = get_values_by_field_and_subfield(bib_object, ('260', ['a']))
+        self.mat_nlp_id = to_single_value(get_values_by_field(pymarc_object, '001'))
+        self.mat_external_id = get_values_by_field_and_subfield(pymarc_object, ('035', ['a']))
+        self.mat_isbn = get_values_by_field_and_subfield(pymarc_object, ('020', ['a']))
+        self.mat_carrier_type = get_values_by_field_and_subfield(pymarc_object, ('338', ['b']))
+        self.mat_media_type = get_values_by_field_and_subfield(pymarc_object, ('337', ['b']))
+        self.mat_number_of_pages = to_single_value(get_values_by_field_and_subfield(pymarc_object, ('300', ['a'])))
+        self.mat_physical_info = get_values_by_field(pymarc_object, '300')
+        self.mat_title_and_resp = get_values_by_field(pymarc_object, '245')
+        self.mat_title_proper = to_single_value(
+            postprocess(truncate_title_proper, get_values_by_field_and_subfield(pymarc_object, ('245', ['a', 'b']))))
+        self.mat_title_variant = get_values_by_field_and_subfield(pymarc_object, ('246', ['a', 'b']))
+        self.mat_edition = get_values_by_field(pymarc_object, '250')
+        self.mat_pub_city = get_values_by_field_and_subfield(pymarc_object, ('260', ['a']))
+        self.mat_pub_info = get_values_by_field(pymarc_object, '260')
 
         self.mat_contributor = []
-        self.mat_nat_bib = []  # todo
-        self.mat_edition = get_values_by_field(bib_object, '250')
+        self.mat_pub_country = []
+        self.get_pub_country(pymarc_object)
+        self.mat_publisher = []
+        self.get_publishers_all(pymarc_object)
+        self.mat_publisher_uniform = []
+        self.get_uniform_publishers(pymarc_object)
+        self.mat_pub_date_from = None
+        self.mat_pub_date_single = None
+        self.mat_pub_date_to = None
+        self.get_mat_pub_dates(pymarc_object)
+
+        self.mat_nat_bib = []  # TODO
+        self.mat_note = []  # TODO
+        self.mat_title_other_info = []  # TODO
+        self.metadata_original = ''  # TODO
+        self.suggest = [self.mat_title_proper]  # TODO
+
+        self.popularity_join = 'owner'
 
         # items
         self.items_by_institution_code = {}
 
     def __repr__(self):
-        return f'Manifestation(id={self.uuid}, raw_record_id={self.raw_record_id})'
+        return f'FRBRManifestation(id={self.uuid}, raw_record_id={self.raw_record_id})'
 
     def get_sha_1_of_manifestation_match_data(self):
         manifestation_match_data_byte_array = bytearray()
@@ -66,18 +84,81 @@ class FRBRManifestation(object):
 
         return sha1(manifestation_match_data_byte_array).hexdigest()
 
+    def get_pub_country(self, pymarc_object):
+        pub_008 = get_values_by_field(pymarc_object, '008')[0][15:18]
+        pub_008 = pub_008[:-1] if pub_008[-1] == ' ' else pub_008
+        pub_044_a = get_values_by_field_and_subfield(pymarc_object, ('044', ['a']))
+
+        country_codes = set()
+
+        country_codes.add(pub_008)
+        country_codes.update(pub_044_a)
+
+        self.mat_pub_country.extend(list(country_codes))
+
+    def get_publishers_all(self, pymarc_object):
+        publishers_raw_list = get_values_by_field_and_subfield(pymarc_object, ('260', ['b']))
+        publishers_list = postprocess(normalize_publisher, publishers_raw_list)
+
+        self.mat_publisher.extend(publishers_list)
+
+    def get_uniform_publishers(self, pymarc_object):
+        list_val_710_0 = set()
+        list_710_fields = pymarc_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                subflds_4 = field.get_subfields('4')
+                if e_subflds or subflds_4:
+                    if 'Wyd.' in e_subflds or 'Wydawca' in e_subflds or 'pbl' in subflds_4:
+                        list_val_710_0.add(' '.join(subfld for subfld in field.get_subfields('0')))
+
+        self.mat_publisher_uniform.extend(list(list_val_710_0))
+
+    def get_mat_pub_dates(self, pymarc_object):
+        v_008_06 = get_values_by_field(pymarc_object, '008')[0][6]
+        if v_008_06 in ['r', 's', 'p', 't']:
+            v_008_0710 = get_values_by_field(pymarc_object,
+                                             '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0')
+            try:
+                self.mat_pub_date_single = int(v_008_0710)
+            except ValueError:
+                pass
+        else:
+            v_008_0710 = get_values_by_field(pymarc_object,
+                                             '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0')
+            v_008_1114 = get_values_by_field(pymarc_object,
+                                             '008')[0][11:15].replace('u', '0').replace(' ', '0').replace('X', '0')
+            try:
+                self.mat_pub_date_from = int(v_008_0710)
+                self.mat_pub_date_to = int(v_008_1114)
+            except ValueError:
+                pass
+
 
 class FinalManifestation(object):
     def __init__(self,
-                 work_id,
-                 expression_id,
+                 work_ids,
+                 expression_ids,
                  item_mat_id,
                  frbr_manifestation):
 
-        self.work_ids = [work_id]
-        self.expression_ids = [expression_id]
+        self.work_ids = work_ids
+        self.expression_ids = expression_ids
         self.item_mat_id = item_mat_id
-        self.library = None
+        self.item_ids = set()
+        self.libraries = set()
+
+        self.work_creator = []
+        self.work_creators = []
+
+        self.mat_digital = False
+        self.stat_digital = False
+        self.stat_digital_library_count = 0
+        self.stat_item_count = 0
+        self.stat_library_count = 0
+        self.stat_public_domain = False
+
         self.frbr_manifestation = frbr_manifestation
 
 
@@ -94,69 +175,12 @@ class Manifestation(object):
                  'work_ids', 'bn_items', 'mak_items', 'polona_items']
 
     def __init__(self, bib_object, work, expression, buffer, descr_index, code_val_index):
-        # attributes for manifestation_es_index
-        self.mock_es_id = str(esid.MANIFESTATION_PREFIX + to_single_value(get_values_by_field(bib_object, '001'))[1:])
 
         self.eForm = only_values(resolve_field_value(
                 get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
-        self.expression_ids = [int(expression.mock_es_id)]
-        self.item_ids = []  # populated after instantiating all the manifestations and mak+ matching
-        self.libraries = []  # populated after instantiating all the manifestations and mak+ matching
-        self.mat_carrier_type = resolve_code_and_serialize(get_values_by_field_and_subfield(bib_object, ('338', ['b'])),
-                                                           'carrier_type_dict',
-                                                           code_val_index)
-        self.mat_contributor = []
-        self.mat_digital = False
-        self.mat_edition = get_values_by_field(bib_object, '250')
-        self.mat_external_id = get_values_by_field_and_subfield(bib_object, ('035', ['a']))
-        self.mat_isbn = get_values_by_field_and_subfield(bib_object, ('020', ['a']))
-        self.mat_matching_title = ''  # todo
-        self.mat_material_type = ''  # todo
-        self.mat_media_type = resolve_code_and_serialize(get_values_by_field_and_subfield(bib_object, ('337', ['b'])),
-                                                         'media_type_dict',
-                                                         code_val_index)
-        self.mat_nat_bib = []  # todo
-        self.mat_nlp_id = to_single_value(get_values_by_field(bib_object, '001'))
-        self.mat_note = []  # todo
-        self.mat_number_of_pages = to_single_value(get_values_by_field_and_subfield(bib_object, ('300', ['a'])))
-        self.mat_physical_info = get_values_by_field(bib_object, '300')
-        self.mat_pub_city = get_values_by_field_and_subfield(bib_object, ('260', ['a']))
-        self.mat_pub_country = []
-        self.get_pub_country(bib_object, code_val_index)
-        self.mat_pub_date_from = None
-        self.mat_pub_date_single = None
-        self.mat_pub_date_to = None
-        self.get_mat_pub_dates(bib_object)
-        self.mat_pub_info = get_values_by_field(bib_object, '260')
-        self.mat_publisher = []
-        self.get_publishers_all(bib_object)
-        self.mat_publisher_uniform = []
-        self.get_uniform_publishers(bib_object, descr_index)
-        self.mat_title_and_resp = get_values_by_field(bib_object, '245')
-        self.mat_title_other_info = []  # todo
-        self.mat_title_proper = to_single_value(
-            postprocess(truncate_title_proper, get_values_by_field_and_subfield(bib_object, ('245', ['a', 'b']))))
-        self.mat_title_variant = get_values_by_field_and_subfield(bib_object, ('246', ['a', 'b']))
-        self.metadata_original = str(uuid4())
-        self.metadata_source = 'REFERENCE'
-        self.modificationTime = "2019-10-01T13:34:23.580"
-        self.phrase_suggest = [self.mat_title_proper]  # todo
-        self.popularity_join = "owner"
-        self.stat_digital = False
-        self.stat_digital_library_count = 0
-        self.stat_item_count = 0
-        self.stat_library_count = 0
-        self.stat_public_domain = False
-        self.suggest = [self.mat_title_proper]  # todo
-        self.work_creator = []
-        self.work_creators = []
+
         self.get_work_creators(work)
         self.get_mat_contributors(bib_object, code_val_index, descr_index)
-        self.work_ids = [int(work.mock_es_id)]
-
-        self.bn_items = [self.instantiate_bn_items(bib_object, work, expression, buffer)]
-        self.polona_items = [self.instantiate_polona_items(bib_object, work, expression, buffer)]
-        self.mak_items = {}
 
     def __repr__(self):
         return f'Manifestation(id={self.mock_es_id}, title_and_resp={self.mat_title_and_resp}'
@@ -216,56 +240,6 @@ class Manifestation(object):
         if work.other_creator:
             self.work_creator = only_values(work.other_creator)
             self.work_creators = only_values(work.other_creator)
-
-    def get_pub_country(self, bib_object, code_val_index):
-        pub_008 = get_values_by_field(bib_object, '008')[0][15:18]
-        pub_008 = pub_008[:-1] if pub_008[-1] == ' ' else pub_008
-        pub_044_a = get_values_by_field_and_subfield(bib_object, ('044', ['a']))
-
-        country_codes = set()
-
-        country_codes.add(pub_008)
-        country_codes.update(pub_044_a)
-
-        self.mat_pub_country.extend(resolve_code_and_serialize(list(country_codes), 'country_dict', code_val_index))
-
-    def get_mat_pub_dates(self, bib_object):
-        v_008_06 = get_values_by_field(bib_object, '008')[0][6]
-        if v_008_06 in ['r', 's', 'p', 't']:
-            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0')
-            try:
-                self.mat_pub_date_single = int(v_008_0710)
-            except ValueError:
-                pass
-        else:
-            v_008_0710 = get_values_by_field(bib_object, '008')[0][7:11].replace('u', '0').replace(' ', '0').replace('X', '0')
-            v_008_1114 = get_values_by_field(bib_object, '008')[0][11:15].replace('u', '0').replace(' ', '0').replace('X', '0')
-            try:
-                self.mat_pub_date_from = int(v_008_0710)
-                self.mat_pub_date_to = int(v_008_1114)
-            except ValueError:
-                pass
-
-    def get_publishers_all(self, bib_object):
-        pl = get_values_by_field_and_subfield(bib_object, ('260', ['b']))
-        publishers_list = postprocess(normalize_publisher, pl)
-
-        self.mat_publisher = publishers_list
-
-    def get_uniform_publishers(self, bib_object, descr_index):
-        list_val_710abcdn = set()
-        list_710_fields = bib_object.get_fields('710')
-        if list_710_fields:
-            for field in list_710_fields:
-                e_subflds = field.get_subfields('e')
-                subflds_4 = field.get_subfields('4')
-                if e_subflds or subflds_4:
-                    if 'Wyd.' in e_subflds or 'Wydawca' in e_subflds or 'pbl' in subflds_4:
-                        list_val_710abcdn.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-        serialized = serialize_to_jsonl_descr(resolved_list_710)
-        self.mat_publisher_uniform.extend(serialized)
 
     def get_resolve_and_serialize_libraries(self, lib_index):
         if self.bn_items:

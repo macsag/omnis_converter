@@ -57,41 +57,60 @@ class FinalConverter(object):
                                         frbr_manifestations_list}
 
             # create FinalWork, join and calculate all "pure" work attributes
-            # remaining "impure" attributes will be collected when iterating through expressions and manifestations
+            # remaining "impure" attributes will be collected when iterating through
+            # expressions, manifestations and items
             final_work = FinalWork(frbr_cluster)
             final_work.join_and_calculate_pure_work_attributes(self.resolver_cache)
 
             # iterate over expressions
             for expression_uuid, expression_object in frbr_cluster.expressions.items():
+
+                # create FinalExpression, join and calculate all "pure" expression attributes
+                # remaining "impure" attributes will be collected when iterating through manifestations
                 final_expression = FinalExpression(expression_object, frbr_cluster.uuid)
                 final_expression.join_and_calculate_pure_expression_attributes(self.resolver_cache)
 
-            # iterate over manifestations and items, build FinalItems, collect data for FinalManifestations building
-            # build FinalManifestations and collect data for FinalExpressions and FinalWorks building
-                item_ids = []
+                # iterate over manifestations and items, build FinalItems, collect data for FinalManifestations building
+                # build FinalManifestations and collect data for FinalExpressions and FinalWorks building
+                for frbr_manifestation_uuid in expression_object.manifestations.keys():
+                    # get reference to the frbr_manifestation_object
+                    frbr_manifestation_object = frbr_manifestations_dict.get(frbr_manifestation_uuid)
 
-                for frbr_manifestation in frbr_manifestations_list:
-                    final_manifestation = FinalManifestation()
+                    # if FRBRManifestation contains multiple works and expression, get their ids
+                    other_work_ids, other_expression_ids = self.get_other_work_and_expression_ids_if_multiwork(
+                        frbr_manifestation_object,
+                        frbr_cluster.uuid,
+                        expression_uuid)
+                    all_work_ids = [frbr_cluster.uuid]
+                    all_work_ids.extend(other_work_ids)
+                    all_expression_ids = [expression_uuid]
+                    all_expression_ids.extend(other_expression_ids)
 
-                    for frbr_item in frbr_manifestation.items_by_institution_code.values():
-                        final_item = FinalItem(frbr_cluster.uuid,
-                                               frbr_manifestation.uuid,
+                    # create FinalManifetation
+                    final_manifestation = FinalManifestation(all_work_ids,
+                                                             all_expression_ids,
+                                                             frbr_manifestation_object.uuid,
+                                                             frbr_manifestation_object)
+
+                    for frbr_item in frbr_manifestation_object.items_by_institution_code.values():
+                        final_item = FinalItem(all_work_ids,
+                                               all_expression_ids,
+                                               frbr_manifestation_object.uuid,
                                                frbr_item)
-                        final_item.get_single_expression_id(frbr_cluster.expressions_by_raw_record_id)
 
-                        # if FRBRManifestation contains multiple works and expression, get their ids
-                        other_work_ids, other_expression_ids = final_item.get_other_work_and_expression_ids_if_multiwork(
-                            self.indexed_frbr_clusters_by_raw_record_id)
-
-                        item_ids.append(frbr_item.uuid)
+                        final_manifestation.stat_item_count += final_item.frbr_item.item_count.count
+                        final_manifestation.item_ids.add(final_item.frbr_item.uuid)
+                        final_manifestation.libraries.add(final_item.library)
 
                         self.resolver_cache.setdefault('institution_codes',
-                                                       {}).setdefault(frbr_item.item_local_bib_id, None)
+                                                       {}).setdefault(final_item.library, None)
+
                         self.final_items.append(final_item)
 
-        # iterate over manifestations
-
-        # TODO
+                    # add remaining impure attributes of expression
+                    final_expression.item_ids.update(final_manifestation.item_ids)
+                    final_expression.stat_item_count += final_manifestation.stat_item_count
+                    final_expression.libraries.update(final_manifestation.libraries)
 
     def get_frbr_clusters(self,
                           frbr_cluster_uuids: List[str]):
@@ -100,7 +119,8 @@ class FinalConverter(object):
 
         frbr_clusters_list = self.indexed_frbr_clusters_by_uuid.mget(frbr_cluster_uuids)
         for frbr_cluster in frbr_clusters_list:
-            frbr_clusters_list_to_return.append(pickle.loads(frbr_cluster))
+            if frbr_cluster:
+                frbr_clusters_list_to_return.append(pickle.loads(frbr_cluster))
 
         return frbr_clusters_list_to_return
 
@@ -119,6 +139,26 @@ class FinalConverter(object):
             manifestations_list_to_return.append(pickle.loads(manifestation))
 
         return manifestations_list_to_return
+
+    def get_other_work_and_expression_ids_if_multiwork(self,
+                                                       frbr_manifestation_object,
+                                                       frbr_cluster_uuid,
+                                                       expression_uuid):
+        other_work_ids = []
+        other_expressions_ids = []
+
+        if frbr_manifestation_object.multiwork:
+            m_related_ids = self.indexed_frbr_clusters_by_raw_record_id.get(frbr_manifestation_object.raw_record_id)
+            m_related_ids = pickle.loads(m_related_ids)
+
+            for work_id in m_related_ids['work_match_data'].values():
+                if work_id != frbr_cluster_uuid:
+                    other_work_ids.append(work_id)
+            for expression_id in m_related_ids['expression_match_data'].values():
+                if expression_id != expression_uuid:
+                    other_expressions_ids.append(expression_id)
+
+        return other_work_ids, other_expressions_ids
 
 
 class MatcherListener(stomp.ConnectionListener):
@@ -145,18 +185,18 @@ if __name__ == "__main__":
     logging.root.setLevel(level=logging.DEBUG)
 
     # initialize connection pools for Redis
-    indexed_frbr_clusters_by_uuid = redis.Redis(db=0)
-    indexed_manifestations_by_uuid = redis.Redis(db=4)
-    indexed_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
+    indexed_frbr_clusters_by_uuid_conn = redis.Redis(db=0)
+    indexed_manifestations_by_uuid_conn = redis.Redis(db=4)
+    indexed_frbr_clusters_by_raw_record_id_conn = redis.Redis(db=2)
 
     # initialize FinalConverter instance
-    final_converter = FinalConverter(indexed_frbr_clusters_by_uuid,
-                                     indexed_manifestations_by_uuid,
-                                     indexed_frbr_clusters_by_raw_record_id)
+    converter = FinalConverter(indexed_frbr_clusters_by_uuid_conn,
+                               indexed_manifestations_by_uuid_conn,
+                               indexed_frbr_clusters_by_raw_record_id_conn)
 
     # initialize ActiveMQ connection and set listener with FinalConverter wrapped
     c = stomp.Connection([('127.0.0.1', 61613)], heartbeats=(0, 0), keepalive=True, auto_decode=False)
-    c.set_listener('matcher_listener', MatcherListener(final_converter))
+    c.set_listener('matcher_listener', MatcherListener(converter))
     c.connect('admin', 'admin', wait=True)
     c.subscribe(destination='/queue/matcher-final-converter', ack='auto', id='matcher_listener')
 

@@ -48,10 +48,10 @@ class FinalExpression(object):
         self.expr_work = {'id': work_uuid, 'type': 'work', 'value': work_uuid}
         self.work_ids = [work_uuid]
 
-        self.materialization_ids = set()
+        self.materialization_ids = [m_id for m_id in frbr_expression.manifestations.keys()]
 
         self.item_ids = set()
-        self.item_count = 0
+        self.stat_item_count = 0
         self.libraries = set()
         self.phrase_suggest = ['-']
         self.suggest = ['-']
@@ -71,48 +71,6 @@ class FinalExpression(object):
             self.expr_lang.update(expression_data_object.expr_lang)
             self.expr_leader_type.update(expression_data_object.expr_leader_type)
             self.expr_title.update(expression_data_object.expr_title)
-
-
-    def add(self, bib_object, work, buffer, descr_index, code_val_index):
-        if not self.mock_es_id:
-            self.mock_es_id = str(esid.EXPRESSION_PREFIX + get_values_by_field(bib_object, '001')[0][1:])
-        if not self.expr_form:
-            self.expr_form = serialize_to_jsonl_descr(resolve_field_value(
-                get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
-        if not self.expr_lang:
-            self.expr_lang = [get_values_by_field(bib_object, '008')[0][35:38]]
-            self.expr_lang = resolve_code_and_serialize(self.expr_lang, 'language_dict', code_val_index)
-        if not self.expr_leader_type:
-            self.expr_leader_type = bib_object.leader[6]
-        if not self.expr_title:
-            self.expr_title = postprocess(truncate_title_proper,
-                                          get_values_by_field_and_subfield(bib_object, ('245', ['a', 'b'])))[0]
-        if not self.work_ids:
-            self.work_ids = [int(work.mock_es_id)]
-        if not self.expr_work:
-            self.expr_work = {'id': int(work.mock_es_id), 'type': 'work', 'value': str(work.mock_es_id)}
-
-        self.materialization_ids.append(int(esid.MANIFESTATION_PREFIX + get_values_by_field(bib_object, '001')[0][1:]))
-        self.instantiate_manifestation(bib_object, work, buffer, descr_index, code_val_index)
-
-    def instantiate_manifestation(self, bib_object, work, buffer, descr_index, code_val_index):
-        self.manifestations.append(Manifestation(bib_object, work, self, buffer, descr_index, code_val_index))
-
-    def get_item_ids_item_count_and_libraries(self):
-        lib_ids = set()
-
-        for m in self.manifestations:
-            self.item_ids.extend([int(i_id) for i_id in m.item_ids])
-
-            for lib in m.libraries:
-                if lib['id'] not in lib_ids:
-                    self.libraries.append(lib)
-                    lib_ids.add(lib['id'])
-            self.item_count += m.stat_item_count
-            self.stat_digital = True if self.stat_digital or m.stat_digital else False
-            self.stat_public_domain = True if self.stat_public_domain or m.stat_public_domain else False
-            self.stat_digital_library_count = 1 if self.stat_digital_library_count == 1 or m.stat_public_domain == 1 \
-                else 0
 
     def write_to_dump_file(self, buffer):
         write_to_json(self.serialize_expression_for_expr_es_dump(), buffer, 'expr_buffer')

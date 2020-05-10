@@ -8,6 +8,9 @@ FIELDS_TO_CHECK = [('100', ['a', 'b', 'c', 'd']),
                    ('711', ['a', 'b', 'c', 'd', 'n', 'p'])]
 
 
+
+
+
 def resolve_record(marc_record, descr_index):
     for marc_field_and_subfields in FIELDS_TO_CHECK:
         fld, subflds = marc_field_and_subfields[0], marc_field_and_subfields[1]

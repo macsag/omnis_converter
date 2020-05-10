@@ -168,23 +168,16 @@ class FinalItem(object):
                  'frbr_item']
 
     def __init__(self,
-                 work_id,
+                 work_ids,
+                 expression_ids,
                  item_mat_id,
                  frbr_item):
 
-        self.work_ids = [work_id]
-        self.expression_ids = []
+        self.work_ids = work_ids
+        self.expression_ids = expression_ids
         self.item_mat_id = item_mat_id
-        self.library = None
+        self.library = frbr_item.local_bib_id
         self.frbr_item = frbr_item
-
-    def get_single_expression_id(self,
-                                     expressions_by_raw_record_id):
-        self.expression_ids.append(expressions_by_raw_record_id.get(self.frbr_item.item_raw_record_id))
-
-    def get_other_work_and_expression_ids_if_multiwork(self,
-                                                       indexed_frbr_clusters_by_raw_record_id):
-        return [], []
 
     def resolve_record(self, resolver_cache):
         library_data = resolver_cache.get(self.frbr_item.item_local_bib_id)
@@ -194,7 +187,7 @@ class FinalItem(object):
         dict_item = {"work_ids": self.work_ids,
                      "expression_ids": self.expression_ids,
                      "item_mat_id": self.item_mat_id,
-                     "item_count": self.frbr_item.item_count,
+                     "item_count": self.frbr_item.item_count.count,
                      "item_url": self.frbr_item.item_url,
                      "library": self.frbr_item.library}
 

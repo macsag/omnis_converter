@@ -13,7 +13,6 @@ from descriptor_resolver.resolve_record import resolve_field_value, only_values
 from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_serialize
 
 from objects.frbr_cluster import FRBRCluster
-from objects.expression import Expression
 from objects.helper_objects import ObjCounter
 
 import config.mock_es_id_prefixes as esid
