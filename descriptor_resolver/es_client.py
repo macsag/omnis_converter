@@ -13,7 +13,7 @@ print(resp)
 
 for single_resp in resp:
     for hit in single_resp:
-        print(hit.descr_name, hit.descr_nlp_id)
+        print(hit.meta.id)
 
 
 

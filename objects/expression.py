@@ -63,14 +63,28 @@ class FinalExpression(object):
     def __repr__(self):
         return f'FinalExpression(id={self.frbr_expression.uuid}, lang={self.expr_lang})'
 
-    def join_and_calculate_pure_expression_attributes(self,
-                                                      resolver_cache):
+    def join_and_calculate_pure_expression_attributes(self):
 
         for expression_data_object in self.frbr_expression.expression_data_by_raw_record_id.values():
             self.expr_form.update(expression_data_object.expr_form)
             self.expr_lang.update(expression_data_object.expr_lang)
             self.expr_leader_type.update(expression_data_object.expr_leader_type)
             self.expr_title.update(expression_data_object.expr_title)
+
+    def collect_data_for_resolver_cache(self,
+                                        resolver_cache: dict):
+
+        descriptor_related_attributes = ['expr_form']
+
+        for attribute in descriptor_related_attributes:
+            for descr_nlp_id in getattr(self, attribute):
+                resolver_cache.setdefault('descriptors', {}).setdefault(descr_nlp_id, None)
+
+        lang_code_related_attributes = ['expr_lang']
+
+        for attribute in lang_code_related_attributes:
+            for lang_code in getattr(self, attribute):
+                resolver_cache.setdefault('language_codes', {}).setdefault(lang_code, None)
 
     def write_to_dump_file(self, buffer):
         write_to_json(self.serialize_expression_for_expr_es_dump(), buffer, 'expr_buffer')

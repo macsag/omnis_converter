@@ -41,12 +41,16 @@ class FRBRManifestation(object):
         self.mat_pub_info = get_values_by_field(pymarc_object, '260')
 
         self.mat_contributor = []
+
         self.mat_pub_country = []
         self.get_pub_country(pymarc_object)
+
         self.mat_publisher = []
         self.get_publishers_all(pymarc_object)
+
         self.mat_publisher_uniform = []
         self.get_uniform_publishers(pymarc_object)
+
         self.mat_pub_date_from = None
         self.mat_pub_date_single = None
         self.mat_pub_date_to = None
@@ -141,11 +145,10 @@ class FinalManifestation(object):
                  work_ids,
                  expression_ids,
                  item_mat_id,
-                 frbr_manifestation):
+                 frbr_manifestation: FRBRManifestation):
 
         self.work_ids = work_ids
         self.expression_ids = expression_ids
-        self.item_mat_id = item_mat_id
         self.item_ids = set()
         self.libraries = set()
 
@@ -160,6 +163,9 @@ class FinalManifestation(object):
         self.stat_public_domain = False
 
         self.frbr_manifestation = frbr_manifestation
+
+
+
 
 
 class Manifestation(object):

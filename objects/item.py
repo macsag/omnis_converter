@@ -176,8 +176,13 @@ class FinalItem(object):
         self.work_ids = work_ids
         self.expression_ids = expression_ids
         self.item_mat_id = item_mat_id
-        self.library = frbr_item.local_bib_id
         self.frbr_item = frbr_item
+        self.library = frbr_item.item_local_bib_id
+
+
+    def collect_data_for_resolver_cache(self, resolver_cache):
+        resolver_cache.setdefault('institution_codes',
+                                  {}).setdefault(self.library, None)
 
     def resolve_record(self, resolver_cache):
         library_data = resolver_cache.get(self.frbr_item.item_local_bib_id)

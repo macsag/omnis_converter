@@ -1,5 +1,4 @@
-from uuid import uuid4
-import json
+import ujson
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
 from commons.marc_iso_commons import read_marc_from_binary, is_dbn, serialize_to_list_of_values
@@ -9,13 +8,14 @@ from commons.json_writer import write_to_json
 from commons.validators import is_number_of_1xx_fields_valid
 from commons.normalization import prepare_name_for_indexing, normalize_title
 
+from resolvers.descriptor_resolvers import resolve_ids_to_names
+
 from descriptor_resolver.resolve_record import resolve_field_value, only_values
 from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_serialize
 
 from objects.frbr_cluster import FRBRCluster
+from objects.manifestation import FinalManifestation
 from objects.helper_objects import ObjCounter
-
-import config.mock_es_id_prefixes as esid
 
 
 class FinalWork(object):
@@ -57,20 +57,20 @@ class FinalWork(object):
 
         # filters data
         self.filter_creator = set()
-        self.filter_cultural_group = []
-        self.filter_form = []
-        self.filter_lang = []
-        self.filter_lang_orig = []
+        self.filter_cultural_group = set()
+        self.filter_form = set()
+        self.filter_lang = set()
+        self.filter_lang_orig = set()
         self.filter_nat_bib_code = []
         self.filter_nat_bib_year = []
-        self.filter_pub_country = []
+        self.filter_pub_country = set()
         self.filter_pub_date = set()
         self.filter_publisher = set()
         self.filter_publisher_uniform = set()
-        self.filter_subject = []
-        self.filter_subject_place = []
-        self.filter_subject_time = []
-        self.filter_time_created = []
+        self.filter_subject = set()
+        self.filter_subject_place = set()
+        self.filter_subject_time = set()
+        self.filter_time_created = set()
 
         # presentation data
         self.work_presentation_main_creator = []
@@ -102,9 +102,9 @@ class FinalWork(object):
         self.work_subject_event = set()
         self.work_subject = set()
         self.work_subject_place = set()
-        self.work_subject_time = []
+        self.work_subject_time = []  # TODO
         self.work_subject_domain = set()
-        self.work_subject_work = []
+        self.work_subject_work = []  # TODO
 
         # invariable data
         self.popularity_join = "owner"
@@ -134,8 +134,7 @@ class FinalWork(object):
     def __repr__(self):
         return f'FinalWork(id={self.frbr_cluster.uuid}, title_pref={self.work_title_pref})'
 
-    def join_and_calculate_pure_work_attributes(self,
-                                                resolver_cache: dict):
+    def join_and_calculate_pure_work_attributes(self):
         for work_data_object in self.frbr_cluster.work_data_by_raw_record_id.values():
             # join data without relations to descriptors
             self.join_titles(work_data_object)
@@ -148,8 +147,8 @@ class FinalWork(object):
             self.work_subject_event.update(work_data_object.work_subject_event)
             self.work_subject.update(work_data_object.work_subject)
             self.work_subject_place.update(work_data_object.work_subject_place)
-            self.work_subject_time = [] #TODO
-            self.work_subject_work = [] #TODO
+            self.work_subject_time = []  # TODO
+            self.work_subject_work = []  # TODO
 
             # join and calculate other descriptor related data
             self.work_genre.update(work_data_object.work_genre)
@@ -157,13 +156,72 @@ class FinalWork(object):
             self.work_form.update(work_data_object.work_form)
             self.work_cultural_group.update(work_data_object.work_cultural_group)
 
-        # now, when we have all raw attributes joined, we can calculate some atrributes
+        # now, when we have all raw attributes joined, we can calculate some more complex atrributes
         # order of calculations have to be retained (e.g. title_of_orig_pref needs lang_orig to be calculated first)
         self.calculate_lang_orig()
         self.calculate_title_of_orig_pref()
         self.calculate_title_pref()
         self.get_titles_of_orig_alt()
         self.get_titles_alt()
+
+        # we can calculate some filter and search attributes as well
+        self.filter_creator.update(self.main_creator_real)
+        self.filter_creator.update(self.other_creator_real)
+
+        self.filter_cultural_group.update(self.work_cultural_group)
+        self.filter_form.update(self.work_form)
+        self.filter_lang.update(self.language_codes)
+        self.filter_lang_orig.update(self.language_of_orig_codes)
+
+        self.filter_subject.update(self.work_subject)
+        self.filter_subject.update(self.work_subject_person)
+        self.filter_subject.update(self.work_subject_corporate_body)
+        self.filter_subject.update(self.work_subject_event)
+
+        self.filter_subject_place.update(self.work_subject_place)
+        self.filter_subject_time.update(self.work_subject_time)
+        self.filter_time_created.update(self.work_time_created)
+
+        # search attributes are joined from multiple "single" atrributes
+        self.search_authors.update(self.main_creator_real)
+        self.search_authors.update(self.other_creator_real)
+
+        self.search_title.update(self.work_title_pref)
+        self.search_title.update(self.work_title_of_orig_pref)
+        self.search_title.update(self.work_title_alt)
+        self.search_title.update(self.work_title_of_orig_alt)
+
+        self.search_subject.update(self.work_subject)
+        self.search_subject.update(self.work_subject_place)
+        self.search_subject.update(self.work_subject_time)
+        self.search_subject.update(self.work_subject_person)
+        self.search_subject.update(self.work_subject_corporate_body)
+        self.search_subject.update(self.work_subject_event)
+
+        #self.search_formal = set()
+        #self.search_form = set()
+
+    def join_and_calculate_impure_work_attributes_from_manifestation(self,
+                                                                     final_manifestation: FinalManifestation):
+
+        self.pub_country_codes.update(final_manifestation.frbr_manifestation.mat_pub_country)
+        self.filter_creator.update(final_manifestation.frbr_manifestation.mat_contributor)
+
+        if final_manifestation.frbr_manifestation.mat_pub_date_single:
+            self.filter_pub_date.add(final_manifestation.frbr_manifestation.mat_pub_date_single)
+        if final_manifestation.frbr_manifestation.mat_pub_date_from:
+            self.filter_pub_date.add(final_manifestation.frbr_manifestation.mat_pub_date_from)
+        if final_manifestation.frbr_manifestation.mat_pub_date_to:
+            self.filter_pub_date.add(final_manifestation.frbr_manifestation.mat_pub_date_to)
+
+        self.filter_publisher.update(final_manifestation.frbr_manifestation.mat_publisher)
+        self.filter_publisher_uniform.update(final_manifestation.frbr_manifestation.mat_publisher_uniform)
+
+        #self.filter_nat_bib_code = []
+        #self.filter_nat_bib_year = []
+
+    def join_and_calculate_impure_work_attributes_final(self):
+        pass
 
     def join_titles(self, work_data_object):
         for title_lang, title_dict in work_data_object.titles245.items():
@@ -189,6 +247,25 @@ class FinalWork(object):
     def join_language_of_orig_codes(self, work_data_object):
         for lang_code, lang_count in work_data_object.language_of_orig_codes.items():
             self.language_of_orig_codes.setdefault(lang_code, ObjCounter()).add(lang_count.count)
+
+    def collect_data_for_resolver_cache(self,
+                                        resolver_cache: dict):
+        descriptor_related_attributes = ['work_subject_person', 'work_subject_corporate_body',
+                                         'work_subject_event', 'work_subject',
+                                         'work_subject_place', 'work_subject_work',
+                                         'work_genre', 'work_subject_domain',
+                                         'work_form', 'work_cultural_group',
+                                         'main_creator_real', 'other_creator_real']
+
+        for attribute in descriptor_related_attributes:
+            for descr_nlp_id in getattr(self, attribute):
+                resolver_cache.setdefault('descriptors', {}).setdefault(descr_nlp_id, None)
+
+        lang_code_related_attributes = ['language_codes']
+
+        for attribute in lang_code_related_attributes:
+            for lang_code in getattr(self, attribute):
+                resolver_cache.setdefault('language_codes', {}).setdefault(lang_code, None)
 
     def get_titles_of_orig_alt(self):
         for title_dict in self.titles246_title_orig.values():
@@ -452,32 +529,25 @@ class FinalWork(object):
 
         self.stat_library_count = len(self.libraries)
 
-    # 9.1
-    def upsert_expression(self, bib_object, buffer, descr_index, code_val_index):
-        list_fields_700 = bib_object.get_fields('700')
-        list_fields_710 = bib_object.get_fields('710')
-        list_fields_711 = bib_object.get_fields('711')
-
-        translators = set()
-
-        if list_fields_700:
-            for field in list_fields_700:
-                if field.get_subfields('e'):
-                    if field.get_subfields('e')[0] in ['Tł.', 'Tł', 'Tłumaczenie']:
-                        translators.add(' '.join(field.get_subfields('a', 'b', 'c', 'd')))
-
-        expr_lang = get_values_by_field(bib_object, '008')[0][35:38]
-        ldr6 = bib_object.leader[6]
-
-        self.expressions_dict.setdefault((expr_lang, frozenset(translators), ldr6),
-                                         Expression()).add(bib_object, self, buffer, descr_index, code_val_index)
-
     def write_to_dump_file(self, buffer):
         write_to_json(self.serialize_work_for_es_work_dump(), buffer, 'work_buffer')
         write_to_json(self.serialize_work_popularity_object_for_es_work_dump(), buffer, 'work_buffer')
 
         for jsonl in self.serialize_work_for_es_work_data_dump():
             write_to_json(jsonl, buffer, 'work_data_buffer')
+
+    def resolve_and_serialize_work_for_bulk_request(self, resolver_cache):
+        dict_work = {'filter_form': resolve_ids_to_names(list(self.filter_form), resolver_cache)}
+
+        return dict_work
+
+    def prepare_for_indexing_in_es(self, resolver_cache):
+        dict_work = self.resolve_and_serialize_work_for_bulk_request(resolver_cache)
+        request = {"index": {"_index": "work", "_type": "work", "_id": self.frbr_cluster.uuid}}
+
+        bulk_list = [request, dict_work]
+
+        return bulk_list
 
     def serialize_work_for_es_work_dump(self):
         dict_work = {"_index": "work", "_type": "work", "_id": str(self.mock_es_id),
