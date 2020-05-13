@@ -109,6 +109,7 @@ class FinalConverter(object):
                         final_manifestation.item_ids.add(final_item.frbr_item.uuid)
                         final_manifestation.libraries.add(final_item.library)
 
+                        # final item record is ready
                         self.final_items.append(final_item)
 
                     #final_manifestation.collect_data_for_resolver_cache(self.resolver_cache)
@@ -119,17 +120,25 @@ class FinalConverter(object):
                     final_expression.stat_item_count += final_manifestation.stat_item_count
                     final_expression.libraries.update(final_manifestation.libraries)
 
+                    # collect all ids and codes to resolve from expression
                     final_expression.collect_data_for_resolver_cache(self.resolver_cache)
 
+                    # final expression record is ready
                     self.final_expressions.append(final_expression)
 
                     # add remaining impure attributes of work basing on manifestation
                     final_work.join_and_calculate_impure_work_attributes_from_manifestation(final_manifestation)
 
-                # add remaining impure attributes of work part basing on expression
+                # add remaining impure attributes (stats) of work part basing on expression
+                final_work.item_ids.update(final_expression.item_ids)
+                final_work.stat_item_count += final_expression.stat_item_count
+                final_work.libraries.update(final_expression.libraries)
+
 
             final_work.join_and_calculate_impure_work_attributes_final()
             final_work.collect_data_for_resolver_cache(self.resolver_cache)
+
+            # final work record is ready
             self.final_works.append(final_work)
 
         self.get_data_for_resolver_cache()

@@ -1,4 +1,4 @@
-def resolve_ids_to_names(list_of_ids, resolver_cache):
+def resolve_institution_codes(institutions_list, resolver_cache):
     descriptors = resolver_cache.get('descriptors')
 
     resolved_list = []
@@ -10,6 +10,3 @@ def resolve_ids_to_names(list_of_ids, resolver_cache):
                 resolved_list.append(resolved_descr.get('value'))
 
     return resolved_list
-
-def resolve_codes_to_names(list_of_codes, resolver_cache):
-

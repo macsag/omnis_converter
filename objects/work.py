@@ -115,7 +115,6 @@ class FinalWork(object):
         self.work_main_creator_index = []
 
         # stats
-
         self.stat_item_count = 0
         self.stat_digital_library_count = 0
         self.stat_library_count = 0
@@ -123,8 +122,8 @@ class FinalWork(object):
         self.stat_public_domain = False
 
         # children ids
-        self.expression_ids = []
-        self.materialization_ids = []
+        self.expression_ids = [e_id for e_id in frbr_cluster.expressions.keys()]
+        self.materialization_ids = [m_id for m_id in frbr_cluster.manifestations_by_raw_record_id.values()]
         self.item_ids = []
 
         # suggestions data
@@ -537,11 +536,80 @@ class FinalWork(object):
             write_to_json(jsonl, buffer, 'work_data_buffer')
 
     def resolve_and_serialize_work_for_bulk_request(self, resolver_cache):
-        dict_work = {'filter_form': resolve_ids_to_names(list(self.filter_form), resolver_cache)}
+        dict_work = {'eForm': resolve_ids_to_names(list(self.filter_form), resolver_cache),
+                     'expression_ids': list(self.expression_ids),
+                     'filter_creator': resolve_ids_to_names(list(self.filter_creator), resolver_cache),
+                     'filter_cultural_group': resolve_ids_to_names(list(self.filter_cultural_group), resolver_cache),
+                     'filter_form': resolve_ids_to_names(list(self.filter_form), resolver_cache),
+                     'filter_lang': resolve_codes_to_names(list(self.filter_lang), resolver_cache),
+                     'filter_lang_orig': resolve_codes_to_names(list(self.filter_lang_orig), resolver_cache),
+                     'filter_nat_bib_code': [],
+                     'filter_nat_bib_year': [],
+                     'filter_pub_country': resolve_codes_to_names(list(self.filter_pub_country), resolver_cache),
+                     'filter_pub_date': list(self.filter_pub_date),
+                     'filter_publisher': list(self.filter_publisher),
+                     'filter_publisher_uniform': resolve_ids_to_names(list(self.filter_publisher_uniform),
+                                                                      resolver_cache),
+                     'filter_subject': resolve_ids_to_names(list(self.filter_subject), resolver_cache),
+                     'filter_subject_place': resolve_ids_to_names(list(self.filter_subject_place), resolver_cache),
+                     'filter_subject_time': [],
+                     'filter_time_created': [],
+                     'item_ids': [int(i_id) for i_id in list(self.item_ids)],
+                     'libraries': self.libraries,
+                     'materialization_ids': list(self.materialization_ids),
+                     'phrase_suggest': list(self.phrase_suggest),
+                     'popularity-join': self.popularity_join,
+                     'search_adress': list(self.search_adress),
+                     'search_authors': list(self.search_authors),
+                     'search_form': list(self.search_form),
+                     'search_formal': list(self.search_formal),
+                     'search_identity': list(self.search_identity),
+                     'search_note': list(self.search_note),
+                     'search_subject': list(self.search_subject),
+                     'search_title': list(self.search_title),
+                     'sort_author': self.sort_author,
+                     'stat_digital': self.stat_digital,
+                     'stat_digital_library_count': self.stat_digital_library_count,
+                     'stat_item_count': self.stat_item_count,
+                     'stat_library_count': self.stat_library_count,
+                     'stat_materialization_count': self.stat_materialization_count,
+                     'stat_public_domain': self.stat_public_domain,
+                     'suggest': list(self.suggest),
+                     'work_cultural_group': serialize_to_jsonl_descr(list(self.work_cultural_group)),
+                     'work_form': serialize_to_jsonl_descr(list(self.work_form)),
+                     'work_genre': serialize_to_jsonl_descr(list(self.work_genre)),
+                     'work_main_creator': list(self.work_main_creator),
+                     'work_other_creator': list(self.work_other_creator),
+                     'work_main_creator_index': list(self.work_main_creator_index),
+                     'work_other_creator_index': list(self.work_other_creator_index),
+                     'work_presentation_main_creator': list(self.work_presentation_main_creator),
+                     'work_presentation_another_creator': list(self.work_presentation_another_creator),
+                     'work_publisher_work': self.work_publisher_work,
+                     'work_subject': serialize_to_jsonl_descr(list(self.work_subject)),
+                     'work_subject_corporate_body': serialize_to_jsonl_descr(
+                         list(self.work_subject_corporate_body)),
+                     'work_subject_domain': serialize_to_jsonl_descr(list(self.work_subject_domain)),
+                     'work_subject_event': serialize_to_jsonl_descr(list(self.work_subject_event)),
+                     'work_subject_person': serialize_to_jsonl_descr(list(self.work_subject_person)),
+                     'work_subject_place': serialize_to_jsonl_descr(list(self.work_subject_place)),
+                     'work_subject_time': list(self.work_subject_time),
+                     'work_subject_work': list(self.work_subject_work),
+                     'work_time_created': list(self.work_time_created),
+                     'work_title_alt': list(self.work_title_alt),
+                     'work_title_index': list(self.work_title_index),
+                     'work_title_of_orig_alt': list(self.work_title_of_orig_alt),
+                     'work_title_of_orig_pref': self.work_title_of_orig_pref,
+                     'work_title_pref': self.work_title_pref,
+                     'work_udc': list(self.work_udc)}
 
         return dict_work
 
+    def resolve_libraries_and_calculate_libraries_stats(self, resolver_cache):
+        self.libraries = resolve_institution_codes(self.libraries, resolver_cache)
+
+
     def prepare_for_indexing_in_es(self, resolver_cache):
+        self.resolve_libraries_and_calculate_libraries_stats(resolver_cache)
         dict_work = self.resolve_and_serialize_work_for_bulk_request(resolver_cache)
         request = {"index": {"_index": "work", "_type": "work", "_id": self.frbr_cluster.uuid}}
 
