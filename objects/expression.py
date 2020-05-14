@@ -7,10 +7,6 @@ from commons.json_writer import write_to_json
 
 from descriptor_resolver.resolve_record import resolve_code_and_serialize, resolve_field_value
 
-from objects.manifestation import Manifestation
-
-import config.mock_es_id_prefixes as esid
-
 
 class FRBRExpression(object):
     __slots__ = ['uuid', 'manifestations', 'expression_distinctive_tuple', 'expression_match_data_sha_1',
@@ -32,6 +28,10 @@ class FRBRExpression(object):
 
 
 class FinalExpression(object):
+    """
+    Wrapper class around FRBRExpression object. Used for building final expression records
+    and serializing final expression and expression_data records.
+    """
     def __init__(self,
                  frbr_expression,
                  work_uuid):

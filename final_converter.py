@@ -22,13 +22,15 @@ class FinalConverter(object):
                  indexed_frbr_clusters_by_uuid,
                  indexed_manifestations_by_uuid,
                  indexed_frbr_clusters_by_raw_record_id,
-                 es_connection_for_resolver_cache):
+                 es_connection_for_resolver_cache,
+                 redis_connection_for_resolver_cache):
 
         # Redis connection pools
         self.indexed_frbr_clusters_by_uuid = indexed_frbr_clusters_by_uuid
         self.indexed_manifestations_by_uuid = indexed_manifestations_by_uuid
         self.indexed_frbr_clusters_by_raw_record_id = indexed_frbr_clusters_by_raw_record_id
         self.es_connection_for_resolver_cache = es_connection_for_resolver_cache
+        self.redis_connection_for_resolver_cache = redis_connection_for_resolver_cache
 
         # create empty lists for appending final objects
         self.final_works = []
@@ -51,20 +53,29 @@ class FinalConverter(object):
         # get all FRBRClusters (FRBRWorks and FRBRExpressions) from indexed_frbr_clusters_by_uuid
         frbr_clusters_list = self.get_frbr_clusters(frbr_cluster_uuids)
 
+        # timestamp for ES version control updated upon requests to Redis
+        work_expression_timestamp = time.time_ns()
+        manifestation_item_timestamp = time.time_ns()
+
         # start main loop - iterater over FRBRClusters
         for frbr_cluster in frbr_clusters_list:
 
             # get FRBRmanifestations and appended FRBRitems from indexed_manifestations_by_uuid
             frbr_manifestations_list = self.get_frbr_manifestations(frbr_cluster)
 
+            # update timestamp for manifestation_item after request to Redis
+            manifestation_item_timestamp = time.time_ns()
+
             # create a dict with key=manifestation_uuid for fast access during iteration over expressions
-            frbr_manifestations_dict = {frbr_manifestation.uuid: frbr_manifestation for frbr_manifestation in
-                                        frbr_manifestations_list}
+            frbr_manifestations_dict = {}
+            for frbr_manifestation in frbr_manifestations_list:
+                if frbr_manifestation:
+                    frbr_manifestations_dict[frbr_manifestation.uuid] = frbr_manifestation
 
             # create FinalWork, join and calculate all "pure" work attributes
             # remaining "impure" attributes will be collected when iterating through
             # expressions, manifestations and items
-            final_work = FinalWork(frbr_cluster)
+            final_work = FinalWork(frbr_cluster, work_expression_timestamp)
             final_work.join_and_calculate_pure_work_attributes()
 
             # iterate over expressions
@@ -143,12 +154,16 @@ class FinalConverter(object):
 
         self.get_data_for_resolver_cache()
 
-        self.resolve_and_serialize_all_records_for_bulk_request()
+        self.resolve_and_serialize_all_records_for_bulk_request(work_expression_timestamp,
+                                                                manifestation_item_timestamp)
 
-    def resolve_and_serialize_all_records_for_bulk_request(self):
+    def resolve_and_serialize_all_records_for_bulk_request(self,
+                                                           work_expression_timestamp,
+                                                           manifestation_item_timestamp):
+
         # resolve all attributes in final work records, serialize them and prepare bulk api request
         for final_work in self.final_works:
-            bulk_request_list = final_work.prepare_for_indexing_in_es(self.resolver_cache)
+            bulk_request_list = final_work.prepare_for_indexing_in_es(self.resolver_cache, work_expression_timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
     def send_bulk_request_to_indexer(self, connection_to_indexer):
@@ -223,18 +238,45 @@ class FinalConverter(object):
         # prepare query for all descriptors
         descriptors_dict = self.resolver_cache.get('descriptors')
         if descriptors_dict:
-            for descriptor_nlp_id in self.resolver_cache['descriptors'].keys():
+            for descriptor_nlp_id in descriptors_dict.keys():
                 ms = ms.add(Search().query('match', descr_nlp_id=descriptor_nlp_id))
 
-            # execute query
-            resp = ms.execute()
+        # prepare query for all institution codes
+        institution_codes_dict = self.resolver_cache.get('institution_codes')
+        if institution_codes_dict:
+            for inst_code in institution_codes_dict.keys():
+                ms = ms.add(Search().query('match', code=inst_code))
 
-            # parse query and collect data for resolver cache
-            for single_resp in resp:
-                for hit in single_resp:
+        # execute query
+        resp = ms.execute()
+
+        # parse query and collect data for resolver cache
+        for single_resp in resp:
+            for hit in single_resp:
+                if hit.meta.index in ['personal_descriptor', 'corporate_descriptor', 'event_descriptor',
+                                      'subject_descriptor', 'geographical_descriptor', 'genre_descriptor']:
                     descriptors_dict[hit.descr_nlp_id] = {'id': hit.meta.id,
                                                           'type': hit.meta.index,
                                                           'value': hit.descr_name}
+                if hit.meta.index == 'manager_library':
+                    institution_codes_dict[hit.code] = {'digital': hit.digital,
+                                                        'localization': hit.localization,
+                                                        'country': hit.country,
+                                                        'province': hit.province,
+                                                        'city': hit.city,
+                                                        'name': hit.name,
+                                                        'id': hit.code}
+
+        # get codes from Redis cache
+        code_types = ['language', 'contribution', 'bibliography',
+                      'carrier_type', 'content_type', 'country',
+                      'media_type', 'publishing_statistics']
+
+        for code_type in code_types:
+            codes_dict = self.resolver_cache.get(code_type)
+            if codes_dict:
+                resp = self.redis_connection_for_resolver_cache.hmget(code_type, [code for code in codes_dict.keys()])
+
 
 
 class MatcherListener(stomp.ConnectionListener):
@@ -270,6 +312,7 @@ if __name__ == "__main__":
     indexed_frbr_clusters_by_uuid_conn = redis.Redis(db=0)
     indexed_manifestations_by_uuid_conn = redis.Redis(db=4)
     indexed_frbr_clusters_by_raw_record_id_conn = redis.Redis(db=2)
+    redis_conn_for_resolver_cache_conn = redis.Redis(db=10, decode_responses=True)
 
     # initialize connection pool for ES
     es_conn = Elasticsearch(hosts=[{"host": "192.168.40.50", 'port': 9200}])
@@ -278,7 +321,8 @@ if __name__ == "__main__":
     converter = FinalConverter(indexed_frbr_clusters_by_uuid_conn,
                                indexed_manifestations_by_uuid_conn,
                                indexed_frbr_clusters_by_raw_record_id_conn,
-                               es_conn)
+                               es_conn,
+                               redis_conn_for_resolver_cache_conn)
 
     # initialize ActiveMQ connection and set listener with FinalConverter wrapped
     c = stomp.Connection([('127.0.0.1', 61613)], heartbeats=(0, 0), keepalive=True, auto_decode=False)
