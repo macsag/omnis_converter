@@ -101,7 +101,7 @@ class FRBRItem(object):
                             pymarc_object: Record,
                             pymarc_item_field: Field,
                             item_ct: dict,
-                            digital: bool):
+                            digital: bool) -> str:
 
         if digital:
             base_path = 'digital_item'
@@ -127,7 +127,9 @@ class FRBRItem(object):
             self.item_count.add(counter.count)
 
     @staticmethod
-    def get_items(pymarc_object: Record, raw_record_id: str, item_ct: dict):
+    def get_items(pymarc_object: Record,
+                  raw_record_id: str,
+                  item_ct: dict) -> dict:
         # create empty dict
         # items are created per library code (one item record per library with item_count for real physical items)
         # {library_code: FRBRItem(), ...}
@@ -167,10 +169,10 @@ class FinalItem(object):
                  'frbr_item']
 
     def __init__(self,
-                 work_ids,
-                 expression_ids,
-                 item_mat_id,
-                 frbr_item):
+                 work_ids: list,
+                 expression_ids: list,
+                 item_mat_id: str,
+                 frbr_item: FRBRItem):
 
         self.work_ids = work_ids
         self.expression_ids = expression_ids
@@ -178,11 +180,13 @@ class FinalItem(object):
         self.frbr_item = frbr_item
         self.library = frbr_item.item_local_bib_id
 
-    def collect_data_for_resolver_cache(self, resolver_cache):
+    def collect_data_for_resolver_cache(self,
+                                        resolver_cache: dict) -> None:
         resolver_cache.setdefault('institution_codes',
                                   {}).setdefault(self.library, None)
 
-    def resolve_record(self, resolver_cache: dict) -> None:
+    def resolve_record(self,
+                       resolver_cache: dict) -> None:
         institution_codes = resolver_cache.get('institution_codes')
         if institution_codes:
             library_data = resolver_cache.get(self.frbr_item.item_local_bib_id)
@@ -191,13 +195,13 @@ class FinalItem(object):
                                 'name': library_data['name'],
                                 'id': library_data['id']}
 
-    def serialize_item_for_bulk_request(self):
+    def serialize_item_for_bulk_request(self) -> dict:
         dict_item = {"work_ids": self.work_ids,
                      "expression_ids": self.expression_ids,
                      "item_mat_id": self.item_mat_id,
                      "item_count": self.frbr_item.item_count.count,
                      "item_url": self.frbr_item.item_url,
-                     "library": self.frbr_item.library}
+                     "library": self.library}
 
         return dict_item
 
