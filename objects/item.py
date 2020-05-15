@@ -1,5 +1,4 @@
 from uuid import uuid4
-import ujson
 
 from pymarc import Record, Field
 
@@ -157,9 +156,9 @@ class FRBRItem(object):
 
 class FinalItem(object):
     """
-    FinalItem class represents final item, which - after serialization to JSON - is sent to indexer.
+    FinalItem class represents final item record, which - after serialization to JSON - is sent to indexer.
     It is a wrapper around FRBRItem class.
-    Instances of this class live short time in final_converter and die after sending message to indexer.
+    Instances of this class live short time in FinalConverter and die after sending message to indexer.
     """
     __slots__ = ['work_ids',
                  'expression_ids',
@@ -179,16 +178,20 @@ class FinalItem(object):
         self.frbr_item = frbr_item
         self.library = frbr_item.item_local_bib_id
 
-
     def collect_data_for_resolver_cache(self, resolver_cache):
         resolver_cache.setdefault('institution_codes',
                                   {}).setdefault(self.library, None)
 
-    def resolve_record(self, resolver_cache):
-        library_data = resolver_cache.get(self.frbr_item.item_local_bib_id)
-        self.library = {'digital': False, 'name': library_data.source['name'], 'id': library_data.es_id}
+    def resolve_record(self, resolver_cache: dict) -> None:
+        institution_codes = resolver_cache.get('institution_codes')
+        if institution_codes:
+            library_data = resolver_cache.get(self.frbr_item.item_local_bib_id)
+            if library_data:
+                self.library = {'digital': library_data['digital'],
+                                'name': library_data['name'],
+                                'id': library_data['id']}
 
-    def serialize_to_es_json(self):
+    def serialize_item_for_bulk_request(self):
         dict_item = {"work_ids": self.work_ids,
                      "expression_ids": self.expression_ids,
                      "item_mat_id": self.item_mat_id,
@@ -196,17 +199,21 @@ class FinalItem(object):
                      "item_url": self.frbr_item.item_url,
                      "library": self.frbr_item.library}
 
-        json_item = ujson.dumps(dict_item, ensure_ascii=False)
+        return dict_item
 
-        return json_item
+    def prepare_for_indexing_in_es(self,
+                                   resolver_cache: dict,
+                                   timestamp: int) -> list:
 
-    def prepare_for_indexing_in_es(self):
-        json_item = self.serialize_to_es_json()
-        request = {"index":
-                       {"_index": "item",
-                        "_type": "item",
-                        "_id": self.frbr_item.uuid}}
+        self.resolve_record(resolver_cache)
+        dict_item = self.serialize_item_for_bulk_request()
 
-        bulk_list = [ujson.dumps(request, ensure_ascii=False),
-                     json_item]
+        request = {"index": {"_index": "item",
+                             "_type": "item",
+                             "_id": self.frbr_item.uuid,
+                             "version": timestamp,
+                             "version_type": "external"}}
+
+        bulk_list = [request, dict_item]
+
         return bulk_list
