@@ -16,7 +16,7 @@ def resolve_institution_codes(institutions_list: list,
 
 def resolve_codes_to_names(list_of_codes: list,
                            code_type: str,
-                           resolver_cache):
+                           resolver_cache: dict) -> list:
     resolved_list = []
     codes = None
 
@@ -32,3 +32,8 @@ def resolve_codes_to_names(list_of_codes: list,
                 resolved_list.append(resolved_code)
 
     return resolved_list
+
+
+def resolve_codes_to_dict_objects(list_of_codes: list,
+                                  code_type: str,
+                                  resolver_cache: dict):

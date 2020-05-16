@@ -19,18 +19,20 @@ from objects.item import FinalItem
 
 class FinalConverter(object):
     def __init__(self,
-                 indexed_frbr_clusters_by_uuid,
-                 indexed_manifestations_by_uuid,
-                 indexed_frbr_clusters_by_raw_record_id,
-                 es_connection_for_resolver_cache,
-                 redis_connection_for_resolver_cache):
+                 indexed_frbr_clusters_by_uuid: redis.Redis,
+                 indexed_manifestations_by_uuid: redis.Redis,
+                 indexed_frbr_clusters_by_raw_record_id: redis.Redis,
+                 es_connection_for_resolver_cache: Elasticsearch,
+                 redis_connection_for_resolver_cache: redis.Redis) -> None:
 
         # Redis connection pools
         self.indexed_frbr_clusters_by_uuid = indexed_frbr_clusters_by_uuid
         self.indexed_manifestations_by_uuid = indexed_manifestations_by_uuid
         self.indexed_frbr_clusters_by_raw_record_id = indexed_frbr_clusters_by_raw_record_id
-        self.es_connection_for_resolver_cache = es_connection_for_resolver_cache
         self.redis_connection_for_resolver_cache = redis_connection_for_resolver_cache
+
+        # ElasticSearch connection pool
+        self.es_connection_for_resolver_cache = es_connection_for_resolver_cache
 
         # create empty lists for appending final objects
         self.final_works = []
@@ -40,6 +42,7 @@ class FinalConverter(object):
         self.final_manifestations = []
         self.final_items = []
 
+        # all serialized final records are being collected in a list
         self.bulk_api_requests_to_send_to_indexer_as_a_list = []
 
         # all codes, ids and names which need to be resolved are being collected in cache - after that they will
@@ -166,6 +169,11 @@ class FinalConverter(object):
             bulk_request_list = final_work.prepare_for_indexing_in_es(self.resolver_cache, work_expression_timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
+        # resolve all attributes in final item records, serialize them and prepare bulk api request
+        for final_item in self.final_items:
+            bulk_request_list = final_item.prepare_for_indexing_in_es(self.resolver_cache, manifestation_item_timestamp)
+            self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
+
     def send_bulk_request_to_indexer(self, connection_to_indexer):
         wrapped_request = {'bulk_api_request': self.bulk_api_requests_to_send_to_indexer_as_a_list}
         wrapped_request_in_json = ujson.dumps(wrapped_request, ensure_ascii=False)
@@ -232,6 +240,7 @@ class FinalConverter(object):
         return other_work_ids, other_expressions_ids
 
     def get_data_for_resolver_cache(self):
+        # ElasticSearch queries below
         # instantiate Multisearch query
         ms = MultiSearch(using=self.es_connection_for_resolver_cache)
 
@@ -250,7 +259,7 @@ class FinalConverter(object):
         # execute query
         resp = ms.execute()
 
-        # parse query and collect data for resolver cache
+        # parse response and collect data for resolver cache
         for single_resp in resp:
             for hit in single_resp:
                 if hit.meta.index in ['personal_descriptor', 'corporate_descriptor', 'event_descriptor',
@@ -267,7 +276,7 @@ class FinalConverter(object):
                                                         'name': hit.name,
                                                         'id': hit.code}
 
-        # get codes from Redis cache
+        # Redis queries below
         code_types = ['language', 'contribution', 'bibliography',
                       'carrier_type', 'content_type', 'country',
                       'media_type', 'publishing_statistics']
@@ -275,8 +284,11 @@ class FinalConverter(object):
         for code_type in code_types:
             codes_dict = self.resolver_cache.get(code_type)
             if codes_dict:
+                # execute query
                 resp = self.redis_connection_for_resolver_cache.hmget(code_type, [code for code in codes_dict.keys()])
-
+                # parse response and collect data for resolver cache
+                for code, name in zip(codes_dict.keys(), resp):
+                    codes_dict[code] = name
 
 
 class MatcherListener(stomp.ConnectionListener):

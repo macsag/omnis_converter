@@ -1,11 +1,10 @@
 import json
 from uuid import uuid4
+import time
+from datetime import datetime, timezone
 
-from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.marc_iso_commons import serialize_to_jsonl_descr, truncate_title_proper
-from commons.json_writer import write_to_json
-
-from descriptor_resolver.resolve_record import resolve_code_and_serialize, resolve_field_value
+from resolvers.descriptor_resolvers import resolve_ids_to_names
+from resolvers.codes_resolvers import resolve_institution_codes, resolve_codes_to_dict_objects
 
 
 class FRBRExpression(object):
@@ -33,8 +32,8 @@ class FinalExpression(object):
     and serializing final expression and expression_data records.
     """
     def __init__(self,
-                 frbr_expression,
-                 work_uuid):
+                 frbr_expression: FRBRExpression,
+                 work_uuid: str):
         self.frbr_expression = frbr_expression
         self.expr_content_type = []  # TODO (but for now in ES it doesn't work as well)
         self.expr_contributor = None  # TODO (but for now in ES it doesn't work as well)
@@ -60,10 +59,12 @@ class FinalExpression(object):
         self.stat_digital_library_count = 0
         self.stat_public_domain = False
 
+        self.modificationTime = datetime.fromtimestamp(time.time(), tz=timezone.utc)
+
     def __repr__(self):
         return f'FinalExpression(id={self.frbr_expression.uuid}, lang={self.expr_lang})'
 
-    def join_and_calculate_pure_expression_attributes(self):
+    def join_and_calculate_pure_expression_attributes(self) -> None:
 
         for expression_data_object in self.frbr_expression.expression_data_by_raw_record_id.values():
             self.expr_form.update(expression_data_object.expr_form)
@@ -72,7 +73,7 @@ class FinalExpression(object):
             self.expr_title.update(expression_data_object.expr_title)
 
     def collect_data_for_resolver_cache(self,
-                                        resolver_cache: dict):
+                                        resolver_cache: dict) -> None:
 
         descriptor_related_attributes = ['expr_form']
 
@@ -86,33 +87,26 @@ class FinalExpression(object):
             for lang_code in getattr(self, attribute):
                 resolver_cache.setdefault('language_codes', {}).setdefault(lang_code, None)
 
-    def write_to_dump_file(self, buffer):
-        write_to_json(self.serialize_expression_for_expr_es_dump(), buffer, 'expr_buffer')
+    def resolve_and_serialize_expression_for_bulk_request(self,
+                                                          resolver_cache: dict) -> dict:
 
-        for jsonl in self.serialize_expression_for_expr_work_es_dump():
-            write_to_json(jsonl, buffer, 'expr_data_buffer')
+        dict_expression = {'expr_content_type': self.expr_content_type,
+                           'expr_form': resolve_ids_to_names(list(self.expr_form), resolver_cache),
+                           'expr_lang': resolve_codes_to_dict_objects(list(self.expr_lang), 'language', resolver_cache),
+                           'expr_leader_type': list(self.expr_leader_type)[0],
+                           'expr_title': self.expr_title,
+                           'expr_work': self.expr_work,
+                           'item_ids': list(self.item_ids),
+                           'libraries': resolve_institution_codes(list(self.libraries), resolver_cache),
+                           'materialization_ids': self.materialization_ids,
+                           'modificationTime': self.modificationTime,
+                           'phrase_suggest': self.phrase_suggest,
+                           'suggest': self.suggest,
+                           'work_ids': self.work_ids}
 
-    def serialize_expression_for_expr_es_dump(self):
-        dict_expression = {"_index": "expression", "_type": "expression", "_id": str(self.mock_es_id),
-                           "_score": 1, "_source": {
-                               'expr_content_type': self.expr_content_type,
-                               'expr_form': self.expr_form,
-                               'expr_lang': self.expr_lang,
-                               'expr_leader_type': self.expr_leader_type,
-                               'expr_title': self.expr_title,
-                               'expr_work': self.expr_work,
-                               'item_ids': self.item_ids,
-                               'libraries': self.libraries,
-                               'materialization_ids': self.materialization_ids,
-                               'metadata_source': self.metadata_source,
-                               'modificationTime': self.modificationTime,
-                               'phrase_suggest': self.phrase_suggest,
-                               'suggest': self.suggest,
-                               'work_ids': self.work_ids}}
+        return dict_expression
 
-        json_expr = json.dumps(dict_expression, ensure_ascii=False)
-
-        return json_expr
+    def
 
     def serialize_expression_for_expr_work_es_dump(self):
         dict_expr_data_list = []
