@@ -1,18 +1,13 @@
 import logging
 import sys
-import os
 import pickle
 
 from tqdm import tqdm
-from pymarc import parse_xml_to_array
 import stomp
-import pickle
 
 from analyzer import analyze_record_and_produce_frbr_clusters
 import commons.validators as c_valid
-from commons.marc_iso_commons import read_marc_from_file, get_values_by_field_and_subfield, get_values_by_field
-from commons.json_writer import JsonBufferOut
-
+from commons.marc_iso_commons import read_marc_from_file, get_values_by_field
 
 import config.main_configuration as c_mc
 
@@ -23,6 +18,41 @@ def has_items(pymarc_object):
 
 def is_245_indicator_2_valid(pymarc_object):
     return True if pymarc_object.get_fields('245')[0].indicators[1] in [str(n) for n in list(range(0, 10))] else False
+
+
+class FRBRizer(object):
+    def __init__(self,
+                 indexed_frbr_clusters_by_uuid: redis.Redis,
+                 indexed_manifestations_by_uuid: redis.Redis,
+                 indexed_frbr_clusters_by_raw_record_id: redis.Redis,
+                 es_connection_for_resolver_cache: Elasticsearch,
+                 redis_connection_for_resolver_cache: redis.Redis) -> None:
+
+        # Redis connection pools
+        self.indexed_frbr_clusters_by_uuid = indexed_frbr_clusters_by_uuid
+        self.indexed_manifestations_by_uuid = indexed_manifestations_by_uuid
+        self.indexed_frbr_clusters_by_raw_record_id = indexed_frbr_clusters_by_raw_record_id
+        self.redis_connection_for_resolver_cache = redis_connection_for_resolver_cache
+
+        # ElasticSearch connection pool
+        self.es_connection_for_resolver_cache = es_connection_for_resolver_cache
+
+        # create empty lists for appending final objects
+        self.final_works = []
+        self.final_work_data_objects = []
+        self.final_expressions = []
+        self.final_expression_data_objects = []
+        self.final_manifestations = []
+        self.final_items = []
+
+        # all serialized final records are being collected in a list
+        self.bulk_api_requests_to_send_to_indexer_as_a_list = []
+
+        # all codes, ids and names which need to be resolved are being collected in cache - after that they will
+        # be resolved using as few requests as possible and put into final objects in second iteration
+        # this should work much faster than making request each time when there is something to resolve
+        self.resolver_cache = {}
+
 
 
 def main_loop(configuration: dict):
@@ -37,21 +67,6 @@ def main_loop(configuration: dict):
     indexed_frbr_clusters_by_raw_record_id = c_mc.INDEXED_FRBR_CLUSTERS_BY_RAW_RECORD_ID
 
     indexed_manifestations_by_uuid = c_mc.INDEXED_MANIFESTATIONS_BY_UUID
-    #indexed_manifestations_bn_by_titles_245 = {}
-    #indexed_manifestations_bn_by_titles_490 = {}
-
-    # prepare indexes
-    # logging.info('Indexing institutions...')
-    # indexed_libs_by_mak_id, indexed_libs_by_es_id = create_lib_indexes(configuration['inst_file_in'])
-    # logging.info('DONE!')
-    #
-    # logging.info('Indexing codes and values...')
-    # indexed_code_values = code_value_indexer(configuration['code_val_file_in'])
-    # logging.info('DONE!')
-    #
-    # logging.info('Indexing descriptors...')
-    # indexed_descriptors = index_descriptors(configuration['descr_files_in'])
-    # logging.info('DONE!')
 
     # start main loop - iterate through all bib records (only books) from BN
     logging.info('Starting main loop...')
@@ -166,7 +181,7 @@ def main_loop(configuration: dict):
 
                                     # now, when we have new manifestation, we can compare items, which were created earlier
                                     # from this raw bibliographic record - we have to be sure, that number of item records
-                                    # (one record per library) and item record count (one library can have more than one volume)
+                                    # (one record per library) and item count (one library can have more than one phisical item)
 
                                     # TODO
 
@@ -193,208 +208,13 @@ def main_loop(configuration: dict):
                         # send new/modified clusters to final conversion
                         # TODO
                         connection_to_converter = configs['amq_conn']
-                        connection_to_converter.send('/queue/matcher-final-converter', pickle.dumps(clusters_to_send))
-
-
-
-
-
-            # create stub work and get
-            # work = Work()
-            # work.get_manifestation_bn_id(bib)
-            # work.get_main_creator(bib, indexed_descriptors)
-            # work.get_other_creator(bib, indexed_descriptors)
-            # work.get_titles(bib)
-
-            counter += 1
-
-            # # try to match with existing work (and if there is a match: merge to one work and index by all titles)
-            # # if there is no match, index new work by titles and by uuid
-            # work.match_with_existing_work_and_index(indexed_works_by_uuid, indexed_works_by_titles)
-            #
-            # # decompose raw record and create
-            #
-            # # index original bib record by bn_id - fast lookup for conversion and manifestation matching
-            # indexed_manifestations_bn_by_nlp_id.setdefault(get_values_by_field(bib, '001')[0], bib.as_marc())
-            #
-            # # index manifestation for matching with mak+ by 245 titles and 490 titles
-            # titles_for_manif_match = get_titles_for_manifestation_matching(bib)
-            #
-            # for title in titles_for_manif_match.get('titles_245'):
-            #     indexed_manifestations_bn_by_titles_245.setdefault(title, set()).add(get_values_by_field(bib, '001')[0])
-            # for title in titles_for_manif_match.get('titles_490'):
-            #     indexed_manifestations_bn_by_titles_490.setdefault(title, set()).add(get_values_by_field(bib, '001')[0])
-
-
-
-    # logging.info('DONE!')
-
-    if configuration['frbr_step_two']:
-
-        logging.info('FRBRrization step two - trying to merge works using broader context (second loop)...')
-
-        for work_uuid, indexed_work in tqdm(indexed_works_by_uuid.items()):
-            # check if work exists, it could've been set to None earlier in case of merging more than one work at a time
-            if indexed_work:
-                result = indexed_work.try_to_merge_possible_duplicates_using_broader_context(indexed_works_by_uuid,
-                                                                                             indexed_works_by_titles)
-                if result:
-                    indexed_works_by_uuid[work_uuid] = None
-
-        logging.info('DONE!')
-
-    logging.info('Conversion in progress...')
-
-    # for work_uuid, indexed_work in tqdm(indexed_works_by_uuid.items()):
-    #     # do conversion, upsert expressions and instantiate manifestations and BN items
-    #     if indexed_work:
-    #         print(indexed_work.titles245)
-    #         indexed_work.convert_to_work(indexed_manifestations_bn_by_nlp_id,
-    #                                      configuration['buffer'],
-    #                                      indexed_descriptors,
-    #                                      indexed_code_values)
-    #
-    #         logging.debug(f'\n{indexed_work.mock_es_id}')
-    #
-    #         for expression in indexed_work.expressions_dict.values():
-    #             logging.debug(f'    {expression}')
-    #
-    #             for manifestation in expression.manifestations:
-    #                 # index works by manifestations nlp id for inserting MAK+ items
-    #                 indexed_works_by_mat_nlp_id.setdefault(manifestation.mat_nlp_id, indexed_work.uuid)
-    #
-    #                 logging.debug(f'        {manifestation}')
-    #                 for i in manifestation.bn_items:
-    #                     logging.debug(f'            {i}')
-
-    logging.info('DONE!')
-
-    if configuration['run_manif_matcher']:
-
-        logging.info('MAK+ manifestation matching in progress...')
-        list_of_files = os.listdir(configuration['mak_files_in'])
-
-        # iterate through marcxml MAK+ files
-        for file_num, filename in enumerate(list_of_files, start=1):
-            if file_num > configuration['limit_mak']:
-                break
-            else:
-                path_file = os.sep.join([configuration['mak_files_in'], filename])
-                logging.info(f'Parsing MAK+ file nr {file_num} - {filename}...')
-                parsed_xml = parse_xml_to_array(path_file)
-
-                # iterate through parsed records (pymarc Records objects)
-                for r in parsed_xml:
-                    # check if it is not None - there are some problems with parsing
-                    if r:
-                        # try to match with BN manifestation
-                        try:
-                            match = match_manifestation(r,
-                                                        index_245=indexed_manifestations_bn_by_titles_245,
-                                                        index_490=indexed_manifestations_bn_by_titles_490,
-                                                        index_id=indexed_manifestations_bn_by_nlp_id)
-                        except (IndexError, ValueError, TypeError) as error:
-                            # print(error)
-                            continue
-
-                        if match:
-                            list_ava = r.get_fields('AVA')
-
-                            w_uuid = indexed_works_by_mat_nlp_id.get(match)
-                            ref_to_work = indexed_works_by_uuid.get(w_uuid)
-
-                            # this is definitely not a best way to do it
-                            if ref_to_work:
-                                for e in ref_to_work.expressions_dict.values():
-                                    for m in e.manifestations:
-                                        if m.mat_nlp_id == match:
-                                            logging.debug('Adding mak_items...')
-                                            item_counter = 0
-                                            item_add_counter = 0
-                                            for num, ava in enumerate(list_ava, start=1):
-                                                try:
-                                                    it_to_add = MakItem(ava, indexed_libs_by_mak_id, ref_to_work,
-                                                                        e, m, buff, num)
-                                                    if it_to_add.item_local_bib_id not in m.mak_items:
-                                                        logging.debug(f'Added new mak_item - {num}')
-                                                        m.mak_items.setdefault(it_to_add.item_local_bib_id, it_to_add)
-                                                        item_counter += 1
-                                                    else:
-                                                        existing_it = m.mak_items.get(it_to_add.item_local_bib_id)
-                                                        existing_it.add(it_to_add)
-                                                        logging.debug(
-                                                            f'Increased item_count in existing mak_item - {num}.')
-                                                        item_add_counter += 1
-                                                except AttributeError as error:
-                                                    logging.debug(error)
-                                                    continue
-                                            logging.debug(
-                                                f'Added {item_counter} new mak_items, increased count {item_add_counter} times.')
-        logging.info('DONE!')
-
-    # loop for:
-    # - adding mak items mock_es_ids
-    # - serializing and writing mak items to json file
-    # - getting libraries for manifestation
-    # - getting mak item ids and count for manifestation
-    # - serializing and writing manifestations to json file
-    # - getting mak item ids and count for expression
-    # - serializing and writing expressions to json file
-    # - getting mak item ids and count, manifestation ids and couun, expresions ids and count for work
-    # - serializing and writing works to json file
-
-    # for indexed_work in tqdm(indexed_works_by_uuid.values()):
-    #     if indexed_work:
-    #         logging.debug(f'\n{indexed_work.mock_es_id}')
-    #
-    #         for expression in indexed_work.expressions_dict.values():
-    #             logging.debug(f'    {expression}')
-    #
-    #             for manifestation in expression.manifestations:
-    #
-    #                 for num, item in enumerate(manifestation.mak_items.values(), start=1):
-    #                     item.mock_es_id = f'{str(num)}{str(manifestation.mock_es_id)}'
-    #                     item.write_to_dump_file(buff)
-    #
-    #                 manifestation.get_resolve_and_serialize_libraries(indexed_libs_by_es_id)
-    #                 manifestation.get_mak_item_ids()
-    #                 manifestation.write_to_dump_file(buff)
-    #                 logging.debug(f'        {manifestation}')
-    #
-    #                 #for i in manif.bn_items:
-    #                     #print(f'            BN - {i}')
-    #                 #for im in manif.mak_items.values():
-    #                     #print(f'            MAK - {im}')
-    #
-    #             expression.get_item_ids_item_count_and_libraries()
-    #             expression.write_to_dump_file(buff)
-    #
-    #         indexed_work.get_expr_manif_item_ids_and_counts()
-    #         indexed_work.write_to_dump_file(buff)
-    #
-    # logging.debug(indexed_works_by_uuid)
-    # logging.debug(indexed_works_by_titles)
-    # logging.debug(indexed_manifestations_bn_by_nlp_id)
-    # logging.debug(indexed_manifestations_bn_by_titles_245)
-    # logging.debug(indexed_manifestations_bn_by_titles_490)
-
-    #frbr_debugger = FRBRDebugger()
-    #frbr_debugger.log_indexed_works_by_uuid(indexed_works_by_uuid)
+                        connection_to_converter.send('/queue/omnis.final-converter-bibliographic', pickle.dumps(clusters_to_send))
 
 
 if __name__ == '__main__':
 
     logging.root.addHandler(logging.StreamHandler(sys.stdout))
     logging.root.setLevel(level=logging.DEBUG)
-
-
-
-    #r_client_frbr_clusters_by_uuid = redis.Redis(db=0)
-    #r_client_frbr_cluster_by_title = redis.Redis(db=1)
-    #r_client_frbr_clusters_by_raw_record_id = redis.Redis(db=2)
-
-    buff = JsonBufferOut('./output/item.json', './output/materialization.json', './output/expression.json',
-                         './output/work.json', './output/expression_data.json', './output/work_data.json')
 
     c = stomp.Connection([('127.0.0.1', 61613)])
     c.connect('admin', 'admin', wait=True)
@@ -412,4 +232,3 @@ if __name__ == '__main__':
                'amq_conn': c}
 
     main_loop(configs)
-    buff.flush()

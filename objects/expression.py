@@ -3,7 +3,7 @@ from uuid import uuid4
 import time
 from datetime import datetime, timezone
 
-from resolvers.descriptor_resolvers import resolve_ids_to_names
+from resolvers.descriptor_resolvers import resolve_ids_to_dict_objects
 from resolvers.codes_resolvers import resolve_institution_codes, resolve_codes_to_dict_objects
 
 
@@ -59,7 +59,7 @@ class FinalExpression(object):
         self.stat_digital_library_count = 0
         self.stat_public_domain = False
 
-        self.modificationTime = datetime.fromtimestamp(time.time(), tz=timezone.utc)
+        self.modificationTime = datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat()
 
     def __repr__(self):
         return f'FinalExpression(id={self.frbr_expression.uuid}, lang={self.expr_lang})'
@@ -70,7 +70,7 @@ class FinalExpression(object):
             self.expr_form.update(expression_data_object.expr_form)
             self.expr_lang.update(expression_data_object.expr_lang)
             self.expr_leader_type.update(expression_data_object.expr_leader_type)
-            self.expr_title.update(expression_data_object.expr_title)
+            self.expr_title.add(expression_data_object.expr_title)
 
     def collect_data_for_resolver_cache(self,
                                         resolver_cache: dict) -> None:
@@ -91,10 +91,10 @@ class FinalExpression(object):
                                                           resolver_cache: dict) -> dict:
 
         dict_expression = {'expr_content_type': self.expr_content_type,
-                           'expr_form': resolve_ids_to_names(list(self.expr_form), resolver_cache),
+                           'expr_form': resolve_ids_to_dict_objects(list(self.expr_form), resolver_cache),
                            'expr_lang': resolve_codes_to_dict_objects(list(self.expr_lang), 'language', resolver_cache),
                            'expr_leader_type': list(self.expr_leader_type)[0],
-                           'expr_title': self.expr_title,
+                           'expr_title': list(self.expr_title)[0],
                            'expr_work': self.expr_work,
                            'item_ids': list(self.item_ids),
                            'libraries': resolve_institution_codes(list(self.libraries), resolver_cache),
@@ -106,35 +106,14 @@ class FinalExpression(object):
 
         return dict_expression
 
-    def
+    def prepare_for_indexing_in_es(self, resolver_cache, timestamp):
+        dict_expression = self.resolve_and_serialize_expression_for_bulk_request(resolver_cache)
+        request = {"index": {"_index": "expression",
+                             "_type": "expression",
+                             "_id": self.frbr_expression.uuid,
+                             "version": timestamp,
+                             "version_type": "external"}}
 
-    def serialize_expression_for_expr_work_es_dump(self):
-        dict_expr_data_list = []
+        bulk_list = [request, dict_expression]
 
-        for num, manif in enumerate(self.manifestations, start=1):
-
-            dict_expression_data = {"_index": "expression_data", "_type": "expression_data",
-                                    "_id": f'{num}{self.mock_es_id}', "_score": 1, "_source": {
-                                        'expr_expression':
-                                            {'id': int(self.mock_es_id),
-                                             'type': 'expression',
-                                             'value': str(self.mock_es_id)},
-                                        'expr_form': self.expr_form,
-                                        'expr_lang': self.expr_lang,
-                                        'expr_leader_type': self.expr_leader_type,
-                                        'expr_materialization':
-                                            {'id': int(manif.mock_es_id),
-                                             'type': 'materialization',
-                                             'value': str(manif.mock_es_id)},
-                                        'expr_title': self.expr_title,
-                                        'expr_work': self.expr_work,
-                                        'metadata_original': manif.metadata_original,
-                                        'metadata_source': self.metadata_source,
-                                        'modificationTime': self.modificationTime,
-                                        'phrase_suggest': self.phrase_suggest,
-                                        'suggest': self.suggest}}
-
-            json_expr_data = json.dumps(dict_expression_data, ensure_ascii=False)
-            dict_expr_data_list.append(json_expr_data)
-
-        return dict_expr_data_list
+        return bulk_list

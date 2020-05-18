@@ -1,18 +1,14 @@
-import ujson
 import time
 from datetime import datetime, timezone
 
 from commons.marc_iso_commons import get_values_by_field_and_subfield, get_values_by_field, postprocess
-from commons.marc_iso_commons import serialize_to_jsonl_descr, serialize_to_jsonl_descr_creator, normalize_publisher
+from commons.marc_iso_commons import serialize_to_jsonl_descr_creator, normalize_publisher
 from commons.marc_iso_commons import select_number_of_creators
 from commons.json_writer import write_to_json
 from commons.normalization import prepare_name_for_indexing, normalize_title
 
-from resolvers.descriptor_resolvers import resolve_ids_to_names
+from resolvers.descriptor_resolvers import resolve_ids_to_names, resolve_ids_to_dict_objects
 from resolvers.codes_resolvers import resolve_institution_codes, resolve_codes_to_names
-
-from descriptor_resolver.resolve_record import resolve_field_value, only_values
-from descriptor_resolver.resolve_record import resolve_code, resolve_code_and_serialize
 
 from objects.frbr_cluster import FRBRCluster
 from objects.manifestation import FinalManifestation
@@ -22,7 +18,7 @@ from objects.helper_objects import ObjCounter
 class FinalWork(object):
     def __init__(self,
                  frbr_cluster: FRBRCluster,
-                 timestamp : int):
+                 timestamp: int):
         self.frbr_cluster = frbr_cluster
 
         # creators for record real metadata
@@ -124,15 +120,15 @@ class FinalWork(object):
 
         # children ids
         self.expression_ids = [e_id for e_id in frbr_cluster.expressions.keys()]
-        self.materialization_ids = [m_id for m_id in frbr_cluster.manifestations_by_raw_record_id.values()]
+        self.materialization_ids = [m_id.get('uuid') for m_id in frbr_cluster.manifestations_by_raw_record_id.values()]
         self.item_ids = set()
 
         # suggestions data
         self.suggest = []
         self.phrase_suggest = []
 
-        #modification_time
-        self.modificationTime = datetime.fromtimestamp(time.time(), tz=timezone.utc)
+        # modification_time
+        self.modificationTime = datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat()
 
     def __repr__(self):
         return f'FinalWork(id={self.frbr_cluster.uuid}, title_pref={self.work_title_pref})'
@@ -189,8 +185,8 @@ class FinalWork(object):
         self.search_authors.update(self.main_creator_real)
         self.search_authors.update(self.other_creator_real)
 
-        self.search_title.update(self.work_title_pref)
-        self.search_title.update(self.work_title_of_orig_pref)
+        self.search_title.add(self.work_title_pref)
+        self.search_title.add(self.work_title_of_orig_pref)
         self.search_title.update(self.work_title_alt)
         self.search_title.update(self.work_title_of_orig_alt)
 
@@ -253,6 +249,7 @@ class FinalWork(object):
 
     def collect_data_for_resolver_cache(self,
                                         resolver_cache: dict):
+
         descriptor_related_attributes = ['work_subject_person', 'work_subject_corporate_body',
                                          'work_subject_event', 'work_subject',
                                          'work_subject_place', 'work_subject_work',
@@ -402,22 +399,7 @@ class FinalWork(object):
         self.filter_publisher_uniform.update(only_values_from_list_710)
 
     # def convert_to_work(self, manifestations_bn_by_id, buffer, descr_index, code_val_index):
-    #         # get simple attributes, without relations to descriptors
-    #         self.work_udc.update(get_values_by_field_and_subfield(bib_object, ('080', ['a'])))
-    #         self.get_language_of_original(bib_object)
-    #         self.get_languages(bib_object)
-    #         self.get_pub_country(bib_object)
     #
-    #
-    #
-    #
-    #         # get other data related to descriptors
-    #         self.work_subject_domain.update(resolve_field_value(
-    #             get_values_by_field_and_subfield(bib_object, ('658', ['a'])), descr_index))
-    #         self.work_form.update(resolve_field_value(
-    #             get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
-    #         self.work_cultural_group.update(resolve_field_value(
-    #             get_values_by_field_and_subfield(bib_object, ('386', ['a'])), descr_index))
     #
     #         # get creators and creators for presentation
     #         self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
@@ -517,13 +499,6 @@ class FinalWork(object):
     #     self.suggest = [self.work_title_pref]  # todo
     #     self.phrase_suggest = [self.work_title_pref]  # todo
 
-    def write_to_dump_file(self, buffer):
-        write_to_json(self.serialize_work_for_es_work_dump(), buffer, 'work_buffer')
-        write_to_json(self.serialize_work_popularity_object_for_es_work_dump(), buffer, 'work_buffer')
-
-        for jsonl in self.serialize_work_for_es_work_data_dump():
-            write_to_json(jsonl, buffer, 'work_data_buffer')
-
     def resolve_libraries_and_calculate_libraries_stats(self, resolver_cache):
         self.libraries = resolve_institution_codes(list(self.libraries), resolver_cache)
         self.stat_library_count = len(self.libraries)
@@ -567,18 +542,18 @@ class FinalWork(object):
                      'filter_subject_time': [],
                      'filter_time_created': [],
                      'item_ids': list(self.item_ids),
-                     'libraries': list(self.libraries),
+                     'libraries': resolve_institution_codes(list(self.libraries), resolver_cache),
                      'materialization_ids': list(self.materialization_ids),
                      'modificationTime': self.modificationTime,
                      'phrase_suggest': list(self.phrase_suggest),
                      'popularity-join': self.popularity_join,
                      'search_adress': list(self.search_adress),
                      'search_authors': list(self.search_authors),
-                     'search_form': list(self.search_form),
-                     'search_formal': list(self.search_formal),
+                     'search_form': resolve_ids_to_names(list(self.search_form), resolver_cache),
+                     'search_formal': resolve_ids_to_names(list(self.search_formal), resolver_cache),
                      'search_identity': list(self.search_identity),
                      'search_note': list(self.search_note),
-                     'search_subject': list(self.search_subject),
+                     'search_subject': resolve_ids_to_names(list(self.search_subject), resolver_cache),
                      'search_title': list(self.search_title),
                      'sort_author': self.sort_author,
                      'stat_digital': self.stat_digital,
@@ -588,23 +563,31 @@ class FinalWork(object):
                      'stat_materialization_count': self.stat_materialization_count,
                      'stat_public_domain': self.stat_public_domain,
                      'suggest': list(self.suggest),
-                     'work_cultural_group': serialize_to_jsonl_descr(list(self.work_cultural_group)),
-                     'work_form': serialize_to_jsonl_descr(list(self.work_form)),
-                     'work_genre': serialize_to_jsonl_descr(list(self.work_genre)),
-                     'work_main_creator': list(self.work_main_creator),
+                     'work_cultural_group': resolve_ids_to_dict_objects(list(self.work_cultural_group),
+                                                                        resolver_cache),
+                     'work_form': resolve_ids_to_dict_objects(list(self.work_form),
+                                                              resolver_cache),
+                     'work_genre': resolve_ids_to_dict_objects(list(self.work_genre),
+                                                               resolver_cache),
+                     'work_main_creator': list(self.main_creator_real),
                      'work_other_creator': list(self.work_other_creator),
                      'work_main_creator_index': list(self.work_main_creator_index),
                      'work_other_creator_index': list(self.work_other_creator_index),
                      'work_presentation_main_creator': list(self.work_presentation_main_creator),
                      'work_presentation_another_creator': list(self.work_presentation_another_creator),
                      'work_publisher_work': self.work_publisher_work,
-                     'work_subject': serialize_to_jsonl_descr(list(self.work_subject)),
-                     'work_subject_corporate_body': serialize_to_jsonl_descr(
-                         list(self.work_subject_corporate_body)),
-                     'work_subject_domain': serialize_to_jsonl_descr(list(self.work_subject_domain)),
-                     'work_subject_event': serialize_to_jsonl_descr(list(self.work_subject_event)),
-                     'work_subject_person': serialize_to_jsonl_descr(list(self.work_subject_person)),
-                     'work_subject_place': serialize_to_jsonl_descr(list(self.work_subject_place)),
+                     'work_subject': resolve_ids_to_dict_objects(list(self.work_subject),
+                                                                 resolver_cache),
+                     'work_subject_corporate_body': resolve_ids_to_dict_objects(list(self.work_subject_corporate_body),
+                                                                                resolver_cache),
+                     'work_subject_domain': resolve_ids_to_dict_objects(list(self.work_subject_domain),
+                                                                        resolver_cache),
+                     'work_subject_event': resolve_ids_to_dict_objects(list(self.work_subject_event),
+                                                                       resolver_cache),
+                     'work_subject_person': resolve_ids_to_dict_objects(list(self.work_subject_person),
+                                                                        resolver_cache),
+                     'work_subject_place': resolve_ids_to_dict_objects(list(self.work_subject_place),
+                                                                       resolver_cache),
                      'work_subject_time': list(self.work_subject_time),
                      'work_subject_work': list(self.work_subject_work),
                      'work_time_created': list(self.work_time_created),
@@ -616,38 +599,3 @@ class FinalWork(object):
                      'work_udc': list(self.work_udc)}
 
         return dict_work
-
-    def serialize_work_for_es_work_data_dump(self):
-        dict_work_data_list = []
-
-        for num1, expr in enumerate(self.expressions_dict.values(), start=1):
-            for num2, m in enumerate(expr.manifestations, start=1):
-
-                dict_work_data = {"_index": "work_data", "_type": "work_data",
-                                  "_id": f'{num2}{num1}{self.mock_es_id}',
-                                  "_score": 1, "_source": {
-                                      'metadata_original': m.metadata_original,
-                                      'metadata_source': self.metadata_source,
-                                      'modificationTime': self.modificationTime,
-                                      'phrase_suggest': ['-'],
-                                      'suggest': ['-'],
-                                      'work_form': expr.expr_form,
-                                      'work_language_of_orig': self.language_orig_obj,
-                                      'work_main_creator': list(self.work_main_creator),
-                                      'work_materialization':
-                                         {'id': int(m.mock_es_id),
-                                          'type': 'materialization',
-                                          'value': str(m.mock_es_id)},
-                                      'work_multi_work': False,
-                                      'work_subject_jhp': [],
-                                      'work_time_created': [],
-                                      'work_title': expr.expr_title,
-                                      'work_work':
-                                          {'id': int(self.mock_es_id),
-                                           'type': 'work',
-                                           'value': str(self.mock_es_id)}}}
-
-                json_work_data = json.dumps(dict_work_data, ensure_ascii=False)
-                dict_work_data_list.append(json_work_data)
-
-        return dict_work_data_list

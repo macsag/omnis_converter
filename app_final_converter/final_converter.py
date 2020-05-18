@@ -1,12 +1,10 @@
 from typing import List
 import logging
-import sys
 import time
 import pickle
 import ujson
 
 import redis
-import stomp
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import MultiSearch, Search
 
@@ -15,6 +13,9 @@ from objects.work import FinalWork
 from objects.expression import FinalExpression
 from objects.manifestation import FRBRManifestation, FinalManifestation
 from objects.item import FinalItem
+
+
+logger = logging.getLogger(__name__)
 
 
 class FinalConverter(object):
@@ -108,7 +109,6 @@ class FinalConverter(object):
                     # create FinalManifestation
                     final_manifestation = FinalManifestation(all_work_ids,
                                                              all_expression_ids,
-                                                             frbr_manifestation_object.uuid,
                                                              frbr_manifestation_object)
 
                     for frbr_item in frbr_manifestation_object.items_by_institution_code.values():
@@ -126,7 +126,7 @@ class FinalConverter(object):
                         # final item record is ready
                         self.final_items.append(final_item)
 
-                    #final_manifestation.collect_data_for_resolver_cache(self.resolver_cache)
+                    final_manifestation.collect_data_for_resolver_cache(self.resolver_cache)
                     self.final_manifestations.append(final_manifestation)
 
                     # add remaining impure attributes of expression basing on manifestation
@@ -134,20 +134,19 @@ class FinalConverter(object):
                     final_expression.stat_item_count += final_manifestation.stat_item_count
                     final_expression.libraries.update(final_manifestation.libraries)
 
-                    # collect all ids and codes to resolve from expression
-                    final_expression.collect_data_for_resolver_cache(self.resolver_cache)
-
-                    # final expression record is ready
-                    self.final_expressions.append(final_expression)
-
                     # add remaining impure attributes of work basing on manifestation
                     final_work.join_and_calculate_impure_work_attributes_from_manifestation(final_manifestation)
+
+                # collect all ids and codes to resolve from expression
+                final_expression.collect_data_for_resolver_cache(self.resolver_cache)
+
+                # final expression record is ready
+                self.final_expressions.append(final_expression)
 
                 # add remaining impure attributes (stats) of work part basing on expression
                 final_work.item_ids.update(final_expression.item_ids)
                 final_work.stat_item_count += final_expression.stat_item_count
                 final_work.libraries.update(final_expression.libraries)
-
 
             final_work.join_and_calculate_impure_work_attributes_final()
             final_work.collect_data_for_resolver_cache(self.resolver_cache)
@@ -166,18 +165,32 @@ class FinalConverter(object):
 
         # resolve all attributes in final work records, serialize them and prepare bulk api request
         for final_work in self.final_works:
-            bulk_request_list = final_work.prepare_for_indexing_in_es(self.resolver_cache, work_expression_timestamp)
+            bulk_request_list = final_work.prepare_for_indexing_in_es(self.resolver_cache,
+                                                                      work_expression_timestamp)
+            self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
+
+        # resolve all attributes in final expression records, serialize them and prepare bulk api request
+        for final_expression in self.final_expressions:
+            bulk_request_list = final_expression.prepare_for_indexing_in_es(self.resolver_cache,
+                                                                            work_expression_timestamp)
+            self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
+
+        # resolve all attributes in final manifestation records, serialize them and prepare bulk api request
+        for final_manifestation in self.final_manifestations:
+            bulk_request_list = final_manifestation.prepare_for_indexing_in_es(self.resolver_cache,
+                                                                               manifestation_item_timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
         # resolve all attributes in final item records, serialize them and prepare bulk api request
         for final_item in self.final_items:
-            bulk_request_list = final_item.prepare_for_indexing_in_es(self.resolver_cache, manifestation_item_timestamp)
+            bulk_request_list = final_item.prepare_for_indexing_in_es(self.resolver_cache,
+                                                                      manifestation_item_timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
     def send_bulk_request_to_indexer(self, connection_to_indexer):
         wrapped_request = {'bulk_api_request': self.bulk_api_requests_to_send_to_indexer_as_a_list}
         wrapped_request_in_json = ujson.dumps(wrapped_request, ensure_ascii=False)
-        connection_to_indexer.send('/queue/indexer', wrapped_request_in_json)
+        connection_to_indexer.send('/queue/omnis.indexer-bibliographic', wrapped_request_in_json)
 
     def flush_all(self):
         self.final_works = []
@@ -240,7 +253,7 @@ class FinalConverter(object):
         return other_work_ids, other_expressions_ids
 
     def get_data_for_resolver_cache(self):
-        # ElasticSearch queries below
+        # ElasticSearch queries
         # instantiate Multisearch query
         ms = MultiSearch(using=self.es_connection_for_resolver_cache)
 
@@ -289,58 +302,3 @@ class FinalConverter(object):
                 # parse response and collect data for resolver cache
                 for code, name in zip(codes_dict.keys(), resp):
                     codes_dict[code] = name
-
-
-class MatcherListener(stomp.ConnectionListener):
-    def __init__(self,
-                 final_converter: FinalConverter,
-                 c):
-        self.final_converter = final_converter
-        self.c = c
-
-    def on_error(self, headers, message):
-        print('received an error "%s"' % message)
-
-    def on_message(self, headers, message):
-        unpickled_message = pickle.loads(message)
-        print('received a message "%s"' % unpickled_message)
-        self.final_converter.convert_and_build_final_records(unpickled_message)
-        print('processed message')
-        self.final_converter.send_bulk_request_to_indexer(self.c)
-        print('message to indexer sent')
-        self.final_converter.flush_all()
-        print('final_converter_flushed')
-
-    def on_disconnected(self):
-        print('disconnected')
-
-
-if __name__ == "__main__":
-
-    logging.root.addHandler(logging.StreamHandler(sys.stdout))
-    logging.root.setLevel(level=logging.DEBUG)
-
-    # initialize connection pools for Redis
-    indexed_frbr_clusters_by_uuid_conn = redis.Redis(db=0)
-    indexed_manifestations_by_uuid_conn = redis.Redis(db=4)
-    indexed_frbr_clusters_by_raw_record_id_conn = redis.Redis(db=2)
-    redis_conn_for_resolver_cache_conn = redis.Redis(db=10, decode_responses=True)
-
-    # initialize connection pool for ES
-    es_conn = Elasticsearch(hosts=[{"host": "192.168.40.50", 'port': 9200}])
-
-    # initialize FinalConverter instance
-    converter = FinalConverter(indexed_frbr_clusters_by_uuid_conn,
-                               indexed_manifestations_by_uuid_conn,
-                               indexed_frbr_clusters_by_raw_record_id_conn,
-                               es_conn,
-                               redis_conn_for_resolver_cache_conn)
-
-    # initialize ActiveMQ connection and set listener with FinalConverter wrapped
-    c = stomp.Connection([('127.0.0.1', 61613)], heartbeats=(0, 0), keepalive=True, auto_decode=False)
-    c.set_listener('matcher_listener', MatcherListener(converter, c))
-    c.connect('admin', 'admin', wait=True)
-    c.subscribe(destination='/queue/matcher-final-converter', ack='auto', id='matcher_listener')
-
-    while True:
-        time.sleep(5)

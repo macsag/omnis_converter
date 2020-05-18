@@ -4,7 +4,6 @@ from typing import Union
 from pymarc import MARCReader, Record, Field
 
 
-
 def read_marc_from_file(file):
     with open(file, 'rb') as fp:
         rdr = MARCReader(fp, to_unicode=True, force_utf8=True, utf8_handling='ignore', permissive=True)
@@ -136,36 +135,6 @@ def is_dbn(marc_object):
     return True if is_600_dbn and is_610_dbn and is_611_dbn and is_630_dbn and is_650_dbn and is_651_dbn and is_655_dbn else False
 
 
-def create_jsonlines_like_dict(list_of_values, marc_object, marc_tag):
-    if list_of_values:
-        helper_dict = {'600' : 'personal_descriptor', '610': 'corporate_descriptor', '611': 'event_descriptor',
-                   '650': 'subject_descriptor', '651': 'geographical_descriptor', '655': 'form_descriptor'}
-
-
-
-        processed_list_of_values = []
-
-        for value in list_of_values:
-            # nlp_id = get_values_by_field_and_subfield(marc_object, (marc_tag, ['0']))[0]
-            # es_id = get_es_id(nlp_id)
-            processed_list_of_values.append(tuple({'id': 111, 'type': helper_dict.get(marc_tag), 'value': value}))
-
-            return processed_list_of_values
-    else:
-        return list_of_values
-
-
-def serialize_to_jsonl_descr(subfields_zero_list):
-    if subfields_zero_list:
-        list_to_return = []
-        for subfield_zero in subfields_zero_list:
-            d_id, d_type, d_value = subfield_zero.split('^^')
-            list_to_return.append({'id': int(d_id), 'type': d_type, 'value': d_value})
-        return list_to_return
-    else:
-        return subfields_zero_list
-
-
 def serialize_to_jsonl_descr_creator(subfields_zero_list):
     if subfields_zero_list:
         list_to_return = []
@@ -197,16 +166,3 @@ def select_number_of_creators(list_of_dicts_of_creators: list, cr_num_start=None
         return list_to_return
     else:
         return list_of_dicts_of_creators
-
-
-def serialize_to_list_of_values(subfields_zero_list):
-    if subfields_zero_list:
-        list_to_return = []
-
-        for subfield_zero in subfields_zero_list:
-            d_id, d_type, d_value = subfield_zero.split('^^')
-            list_to_return.append(d_value)
-
-        return list_to_return
-    else:
-        return subfields_zero_list
