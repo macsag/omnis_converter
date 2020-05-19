@@ -14,7 +14,7 @@ def read_marc_from_file(file):
 def read_marc_from_binary(data_chunk):
     marc_rdr = MARCReader(data_chunk, to_unicode=True, force_utf8=True, utf8_handling='ignore', permissive=True)
     for rcd in marc_rdr:
-        return rcd
+        yield rcd
 
 
 def get_values_by_field(marc21_record, field):

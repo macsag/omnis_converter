@@ -3,7 +3,7 @@ import stomp
 
 class FinalConverterListener(stomp.ConnectionListener):
     def __init__(self,
-                 final_converter: FinalConverter,
+                 final_converter,
                  c):
         self.final_converter = final_converter
         self.c = c

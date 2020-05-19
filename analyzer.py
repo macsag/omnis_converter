@@ -1,4 +1,5 @@
 from typing import List, Optional
+import logging
 
 from pymarc import Record
 
@@ -7,12 +8,17 @@ import commons.validators as c_valid
 from objects.frbr_cluster import FRBRCluster
 
 
+logger = logging.getLogger(__name__)
+
+
 def analyze_record_and_produce_frbr_clusters(pymarc_object: Record) -> List[FRBRCluster]:
     list_of_frbr_clusters = []
     is_single_or_multi = c_valid.is_single_or_multi_work(pymarc_object)
 
     # single work bib record - produce only one FRBRCluster
     if is_single_or_multi == 'single_work':
+        logger.debug('Record is single_work.')
+
         frbr_cluster = produce_frbr_cluster_from_single_work(pymarc_object)
         list_of_frbr_clusters.append(frbr_cluster)
 

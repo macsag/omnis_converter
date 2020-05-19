@@ -24,7 +24,7 @@ class FinalConverter(object):
                  indexed_manifestations_by_uuid: redis.Redis,
                  indexed_frbr_clusters_by_raw_record_id: redis.Redis,
                  es_connection_for_resolver_cache: Elasticsearch,
-                 redis_connection_for_resolver_cache: redis.Redis) -> None:
+                 redis_connection_for_resolver_cache: redis.Redis):
 
         # Redis connection pools
         self.indexed_frbr_clusters_by_uuid = indexed_frbr_clusters_by_uuid
