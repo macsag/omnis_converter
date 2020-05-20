@@ -1,11 +1,10 @@
 import logging
-import sys
 import io
 import pickle
 import redis
 
+import ujson
 from tqdm import tqdm
-import stomp
 
 from analyzer import analyze_record_and_produce_frbr_clusters
 import commons.validators as c_valid
@@ -41,7 +40,7 @@ class FRBRizer(object):
         self.indexed_frbr_clusters_by_raw_record_id = indexed_frbr_clusters_by_raw_record_id
         self.indexed_manifestations_by_uuid = indexed_manifestations_by_uuid
 
-        self.clusters_to_index = set()
+        self.clusters_to_convert = set()
         self.clusters_to_delete = set()
 
     def frbrize_from_message(self,
@@ -179,7 +178,7 @@ class FRBRizer(object):
 
                             # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
                             # or create and index new frbr_cluster
-                            clusters_to_send = frbr_cluster.match_work_and_index(
+                            updated_clusters = frbr_cluster.match_work_and_index(
                                 self.indexed_frbr_clusters_by_uuid,
                                 self.indexed_frbr_clusters_by_titles,
                                 self.indexed_frbr_clusters_by_raw_record_id,
@@ -187,11 +186,18 @@ class FRBRizer(object):
                                 pymarc_object,
                                 item_conversion_table)
 
-                            logger.debug(f'Produced clusters to send: {clusters_to_send}')
-
+                            # send new/modified clusters to final conversion
+                            logger.debug(f'Added: {updated_clusters[-1]} to send to converter (conversion).')
+                            # only the last cluster needs to be converted,
+                            # others have been merged and need to be deleted
+                            self.clusters_to_convert.update(updated_clusters[-1])
+                            logger.debug(f'Added: {updated_clusters[:-1]} to send to converter (deletion).')
+                            self.clusters_to_delete.update(updated_clusters[:-1])
 
     def frbrize_from_file(self,
-                          filepath: str):
+                          filepath: str,
+                          connection_to_converter,
+                          final_converter_queue_name):
 
         item_conversion_table = {"physical_item":
                         {"item_field_tag": "852",
@@ -226,102 +232,131 @@ class FRBRizer(object):
                          }
                     }
 
-        for pymarc_object in tqdm(read_marc_from_file(filepath)):
+        for pymarc_objects_list in tqdm(read_marc_from_file(filepath)):
 
-            if c_valid.is_document_type(pymarc_object) and \
-                    c_valid.is_single_or_multi_work(pymarc_object) == 'single_work' and \
-                    has_items(pymarc_object) and \
-                    is_245_indicator_2_valid(pymarc_object):
+            for pymarc_object in pymarc_objects_list:
 
-                # analyze bibliographic record
-                # and create one or more FRBRCluster instances (one if single work bib, two or more if multi work bib)
-                # and get from raw parsed record data needed for matching each or them
-                # and for building final works, expressions and manifestations (work_data, expression_data, etc.)
-                frbr_clusters_list = analyze_record_and_produce_frbr_clusters(pymarc_object)
+                if c_valid.is_document_type(pymarc_object) and \
+                        c_valid.is_single_or_multi_work(pymarc_object) == 'single_work' and \
+                        has_items(pymarc_object) and \
+                        is_245_indicator_2_valid(pymarc_object):
 
-                for frbr_cluster in frbr_clusters_list:
-                    # has the raw record been already matched?
-                    # has data needed for matching produced clusters changed?
-                    # check this by looking up in indexed hashes (by raw_record_id)
-                    # of frbr_cluster_match_data, expression_match_data and manifestation_match_data
-                    # for each cluster produced by raw record
-                    # if nothing changed, there is nothing to do in matcher
-                    # pass record and related frbr_clusters directly to converter
-                    # (other data still may have been changed)
+                    logger.debug(f'Record will be processed.')
 
-                    # get match_info
+                    # analyze bibliographic record
+                    # and create one or more FRBRCluster instances (one if single work bib, two or more if multi work bib)
+                    # and get from raw parsed record data needed for matching each or them
+                    # and for building final works, expressions and manifestations (work_data, expression_data, etc.)
+                    frbr_clusters_list = analyze_record_and_produce_frbr_clusters(pymarc_object)
 
-                    if frbr_cluster:
+                    for frbr_cluster in frbr_clusters_list:
+                        # has the raw record been already matched?
+                        # has data needed for matching produced clusters changed?
+                        # check this by looking up in indexed hashes (by raw_record_id)
+                        # of frbr_cluster_match_data, expression_match_data and manifestation_match_data
+                        # for each cluster produced by raw record
+                        # if nothing changed, there is nothing to do in matcher
+                        # pass record and related frbr_clusters directly to converter
+                        # (other data still may have been changed)
 
-                        if not c_mc.IS_INITIAL_IMPORT:
-                            # local dict version
-                            if type(indexed_frbr_clusters_by_raw_record_id) == dict:
-                                frbr_cluster_match_info = indexed_frbr_clusters_by_raw_record_id.get(
-                                    frbr_cluster.original_raw_record_id)
-                            # Redis version
-                            else:
-                                frbr_cluster_match_info_raw = indexed_frbr_clusters_by_raw_record_id.get(
-                                    frbr_cluster.original_raw_record_id)
-                                if frbr_cluster_match_info_raw:
-                                    frbr_cluster_match_info = pickle.loads(frbr_cluster_match_info_raw)
+                        # get match_info
+
+                        if frbr_cluster:
+
+                            if not c_mc.IS_INITIAL_IMPORT:
+                                # local dict version
+                                if type(self.indexed_frbr_clusters_by_raw_record_id) == dict:
+                                    frbr_cluster_match_info = self.indexed_frbr_clusters_by_raw_record_id.get(
+                                        frbr_cluster.original_raw_record_id)
+                                # Redis version
                                 else:
-                                    frbr_cluster_match_info = None
+                                    frbr_cluster_match_info_raw = self.indexed_frbr_clusters_by_raw_record_id.get(
+                                        frbr_cluster.original_raw_record_id)
+                                    if frbr_cluster_match_info_raw:
+                                        frbr_cluster_match_info = pickle.loads(frbr_cluster_match_info_raw)
+                                    else:
+                                        frbr_cluster_match_info = None
 
-                            # if record was already indexed, compare match_data
-                            if frbr_cluster_match_info:
-                                changes = frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
+                                # if record was already indexed, compare match_data
+                                if frbr_cluster_match_info:
+                                    changes = frbr_cluster.check_changes_in_match_data(frbr_cluster_match_info)
 
-                                # if nothing changed, rebuild work_data, expression_data and manifestation
-                                # using uuids from frbr_cluster_match_info to get frbr_cluster from database
-                                # and raw_record_id to get manifestation and data from frbr_cluster
-                                if not changes:
-                                    frbr_cluster_to_rebuild_uuid = frbr_cluster_match_info.get(frbr_cluster.work_match_data_sha_1)
-                                    new_work_data = frbr_cluster.work_data_by_raw_record_id.get(frbr_cluster.original_raw_record_id)
-                                    new_expression_data = None # TODO
+                                    # if nothing changed, rebuild work_data, expression_data and manifestation
+                                    # using uuids from frbr_cluster_match_info to get frbr_cluster from database
+                                    # and raw_record_id to get manifestation and data from frbr_cluster
+                                    if not changes:
+                                        frbr_cluster_to_rebuild_uuid = frbr_cluster_match_info.get(frbr_cluster.work_match_data_sha_1)
+                                        new_work_data = frbr_cluster.work_data_by_raw_record_id.get(frbr_cluster.original_raw_record_id)
+                                        new_expression_data = None # TODO
 
-                                    # local dict version
-                                    if type(indexed_frbr_clusters_by_uuid) == dict:
+                                        # local dict version
+                                        if type(self.indexed_frbr_clusters_by_uuid) == dict:
 
-                                        # get cluster from local dict
-                                        frbr_cluster_to_rebuild = indexed_frbr_clusters_by_uuid.get(frbr_cluster_to_rebuild_uuid)
-                                        # rebuild work_data and expression_data
-                                        frbr_cluster_to_rebuild.rebuild_work_and_expression_data(new_work_data,
-                                                                                                 new_expression_data)
+                                            # get cluster from local dict
+                                            frbr_cluster_to_rebuild = self.indexed_frbr_clusters_by_uuid.get(frbr_cluster_to_rebuild_uuid)
+                                            # rebuild work_data and expression_data
+                                            frbr_cluster_to_rebuild.rebuild_work_and_expression_data(new_work_data,
+                                                                                                     new_expression_data)
 
-                                        # rebuild manifestation (data for manifestation comes from newly created frbr_cluster,
-                                        # but manifestation uuid must not change, so we create manifestation and replace new uuid
-                                        # with old uuid from match_info)
-                                        new_manifestation = frbr_cluster.create_manifestation(pymarc_object)
-                                        new_manifestation.uuid = frbr_cluster_match_info.get(
-                                            new_manifestation.manifestation_match_data_sha_1)
+                                            # rebuild manifestation (data for manifestation comes from newly created frbr_cluster,
+                                            # but manifestation uuid must not change, so we create manifestation and replace new uuid
+                                            # with old uuid from match_info)
+                                            new_manifestation = frbr_cluster.create_manifestation(pymarc_object)
+                                            new_manifestation.uuid = frbr_cluster_match_info.get(
+                                                new_manifestation.manifestation_match_data_sha_1)
 
-                                        # now, when we have new manifestation, we can compare items, which were created earlier
-                                        # from this raw bibliographic record - we have to be sure, that number of item records
-                                        # (one record per library) and item count (one library can have more than one phisical item)
+                                            # now, when we have new manifestation, we can compare items, which were created earlier
+                                            # from this raw bibliographic record - we have to be sure, that number of item records
+                                            # (one record per library) and item count (one library can have more than one phisical item)
 
-                                        # TODO
+                                            # TODO
 
-                                    # Redis version
+                                        # Redis version
+                                        else:
+                                            pass # TODO
+
+                                    # if something has changed, situation gets a bit complicated
+                                    # since single raw record can produce more than one frbr_cluster, we've got
                                     else:
                                         pass # TODO
 
-                                # if something has changed, situation gets a bit complicated
-                                # since single raw record can produce more than one frbr_cluster, we've got
-                                else:
-                                    pass # TODO
+                            # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
+                            # or create and index new frbr_cluster
+                            updated_clusters = frbr_cluster.match_work_and_index(
+                                self.indexed_frbr_clusters_by_uuid,
+                                self.indexed_frbr_clusters_by_titles,
+                                self.indexed_frbr_clusters_by_raw_record_id,
+                                self.indexed_manifestations_by_uuid,
+                                pymarc_object,
+                                item_conversion_table)
 
-                        # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
-                        # or create and index new frbr_cluster
-                        clusters_to_send = frbr_cluster.match_work_and_index(indexed_frbr_clusters_by_uuid,
-                                                          indexed_frbr_clusters_by_titles,
-                                                          indexed_frbr_clusters_by_raw_record_id,
-                                                          indexed_manifestations_by_uuid,
-                                                          pymarc_object,
-                                                          item_conversion_table)
-
-                        # switch for initial import (final records are built only once after matching in initial import)
-                        if not c_mc.IS_INITIAL_IMPORT:
                             # send new/modified clusters to final conversion
-                            # TODO
-                            connection_to_converter = configs['amq_conn']
-                            connection_to_converter.send('/queue/omnis.final-converter-bibliographic', pickle.dumps(clusters_to_send))
+                            logger.debug(f'Added: {updated_clusters[-1]} to send to converter (conversion).')
+                            # only the last cluster needs to be converted,
+                            # others have been merged and need to be deleted
+                            self.clusters_to_convert.update(updated_clusters[-1])
+                            logger.debug(f'Added: {updated_clusters[:-1]} to send to converter (deletion).')
+                            self.clusters_to_delete.update(updated_clusters[:-1])
+
+            self.send_to_final_converter(connection_to_converter,
+                                         final_converter_queue_name)
+            self.flush_all()
+
+    def send_to_final_converter(self,
+                                connection_to_converter,
+                                final_converter_queue_name):
+
+        logger.debug(f'Sending {len(self.clusters_to_convert)} cluster(s) for conversion '
+                     f'|| {len(self.clusters_to_delete)} cluster(s) for deletion to final-converter...')
+
+        message = {'clusters_to_convert': list(self.clusters_to_convert),
+                   'clusters_to_delete': list(self.clusters_to_delete)}
+
+        connection_to_converter.send(final_converter_queue_name,
+                                     ujson.dumps(message))
+
+        logger.debug('Message successfully sent.')
+
+    def flush_all(self):
+        self.clusters_to_convert = set()
+        self.clusters_to_delete = set()

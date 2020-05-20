@@ -65,9 +65,12 @@ AMQ_PORT = os.getenv('AMQ_PORT')
 AMQ_USER = os.getenv('AMQ_USER')
 AMQ_PASSWORD = os.getenv('AMQ_PASSWORD')
 AMQ_FRBRIZER_QUEUE_NAME = os.getenv('AMQ_FRBRIZER_QUEUE_NAME')
+AMQ_FINAL_CONVERTER_QUEUE_NAME = os.getenv('AMQ_FINAL_CONVERTER_QUEUE_NAME')
 
 c = stomp.Connection([(AMQ_HOST, AMQ_PORT)], heartbeats=(0, 0), keepalive=True, auto_decode=False)
-c.set_listener('frbrizer_listener', FRBRizerListener(frbrizer, c))
+c.set_listener('frbrizer_listener', FRBRizerListener(frbrizer,
+                                                     AMQ_FINAL_CONVERTER_QUEUE_NAME,
+                                                     c))
 c.connect(AMQ_USER, AMQ_PASSWORD, wait=True)
 c.subscribe(destination=f'/queue/{AMQ_FRBRIZER_QUEUE_NAME}',
             ack='client',

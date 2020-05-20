@@ -7,8 +7,12 @@ from pymarc import MARCReader, Record, Field
 def read_marc_from_file(file):
     with open(file, 'rb') as fp:
         rdr = MARCReader(fp, to_unicode=True, force_utf8=True, utf8_handling='ignore', permissive=True)
+        rcds = []
         for rcd in rdr:
-            yield rcd
+            rcds.append(rcd)
+            if len(rcds) % 1000 == 0:
+                yield rcds
+                rcds = []
 
 
 def read_marc_from_binary(data_chunk):

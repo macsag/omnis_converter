@@ -5,9 +5,11 @@ import stomp
 class FRBRizerListener(stomp.ConnectionListener):
     def __init__(self,
                  frbrizer,
+                 final_converter_queue_name,
                  c):
 
         self.frbrizer = frbrizer
+        self.final_converter_queue_name = final_converter_queue_name
         self.c = c
 
     def on_error(self, headers, message):
@@ -19,10 +21,11 @@ class FRBRizerListener(stomp.ConnectionListener):
         print('received a message "%s"' % dict_message)
         self.frbrizer.frbrize_from_message(dict_message)
         print('processed message')
-        # self.frbrizer.send_to_final_converter(self.c)
-        # print('message to indexer sent')
-        # self.frbrizer.flush_all()
-        # print('final_converter_flushed')
+        self.frbrizer.send_to_final_converter(self.c,
+                                              self.final_converter_queue_name)
+        print('message to indexer sent')
+        self.frbrizer.flush_all()
+        print('final_converter_flushed')
 
     def on_disconnected(self):
         print('disconnected')

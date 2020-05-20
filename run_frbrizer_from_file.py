@@ -64,8 +64,11 @@ AMQ_HOST = os.getenv('AMQ_HOST')
 AMQ_PORT = os.getenv('AMQ_PORT')
 AMQ_USER = os.getenv('AMQ_USER')
 AMQ_PASSWORD = os.getenv('AMQ_PASSWORD')
-AMQ_FRBRIZER_QUEUE_NAME = os.getenv('AMQ_FRBRIZER_QUEUE_NAME')
+AMQ_FINAL_CONVERTER_QUEUE_NAME = os.getenv('AMQ_FINAL_CONVERTER_QUEUE_NAME')
 
 c = stomp.Connection([(AMQ_HOST, AMQ_PORT)], heartbeats=(0, 0), keepalive=True, auto_decode=False)
 c.connect(AMQ_USER, AMQ_PASSWORD, wait=True)
 
+frbrizer.frbrize_from_file('./input_files/bib_records/bn/bibs-ksiazka-preprocessed.marc',
+                           c,
+                           AMQ_FINAL_CONVERTER_QUEUE_NAME)
