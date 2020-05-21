@@ -1,18 +1,16 @@
 import logging
 import sys
 import os
-import time
 
 import stomp
 import redis
 from dotenv import load_dotenv
 
 from app_frbrizer.frbrizer import FRBRizer
-from amq_listeners.frbrizer_listeners import FRBRizerListener
 
 # set up logging
 logging.root.addHandler(logging.StreamHandler(sys.stdout))
-logging.root.setLevel(level=logging.DEBUG)
+logging.root.setLevel(level=logging.INFO)
 
 # get environment from CLI
 try:

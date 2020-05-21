@@ -10,7 +10,7 @@ def read_marc_from_file(file):
         rcds = []
         for rcd in rdr:
             rcds.append(rcd)
-            if len(rcds) % 1000 == 0:
+            if len(rcds) % 5 == 0:
                 yield rcds
                 rcds = []
 

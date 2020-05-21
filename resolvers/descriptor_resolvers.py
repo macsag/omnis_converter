@@ -26,6 +26,25 @@ def resolve_ids_to_dict_objects(list_of_ids, resolver_cache):
     return resolved_list
 
 
+def resolve_ids_to_dict_objects_contributors(dict_of_contributors,
+                                             resolver_cache):
+
+    descriptors = resolver_cache.get('descriptors')
+    contributor_codes = resolver_cache.get('contributors')
+
+    resolved_dict = {}
+
+    if descriptors and contributor_codes:
+        for contributor_code, contributors_set in dict_of_contributors.items():
+            resolved_code = contributor_codes.get(contributor_code)
+            if resolved_code:
+                for descr_nlp_id in contributors_set:
+                    resolved_descr = descriptors.get(descr_nlp_id)
+                    if resolved_descr:
+                        resolved_dict.setdefault(resolved_code, []).append(resolved_descr)
+
+    return resolved_dict
+
 def resolve_ids_to_dict_objects_main_creator(subfields_zero_list):
     if subfields_zero_list:
         list_to_return = []

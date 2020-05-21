@@ -1,24 +1,17 @@
 import logging
 import io
 import pickle
-import redis
+import time
 
 import ujson
+import redis
 from tqdm import tqdm
 
 from analyzer import analyze_record_and_produce_frbr_clusters
 import commons.validators as c_valid
-from commons.marc_iso_commons import read_marc_from_file, read_marc_from_binary, get_values_by_field
+from commons.marc_iso_commons import read_marc_from_file, read_marc_from_binary
 
 import config.main_configuration as c_mc
-
-
-def has_items(pymarc_object):
-    return True if get_values_by_field(pymarc_object, '852') else False
-
-
-def is_245_indicator_2_valid(pymarc_object):
-    return True if pymarc_object.get_fields('245')[0].indicators[1] in [str(n) for n in list(range(0, 10))] else False
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +35,7 @@ class FRBRizer(object):
 
         self.clusters_to_convert = set()
         self.clusters_to_delete = set()
+        self.expressions_to_delete = set()
 
     def frbrize_from_message(self,
                 message: dict):
@@ -92,8 +86,8 @@ class FRBRizer(object):
 
                 if c_valid.is_document_type(pymarc_object) and \
                         c_valid.is_single_or_multi_work(pymarc_object) == 'single_work' and \
-                        has_items(pymarc_object) and \
-                        is_245_indicator_2_valid(pymarc_object):
+                        c_valid.has_items(pymarc_object) and \
+                        c_valid.is_245_indicator_2_valid(pymarc_object):
 
                     logger.debug(f'Record will be processed.')
 
@@ -178,7 +172,7 @@ class FRBRizer(object):
 
                             # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
                             # or create and index new frbr_cluster
-                            updated_clusters = frbr_cluster.match_work_and_index(
+                            updated_clusters, expressions_to_delete = frbr_cluster.match_work_and_index(
                                 self.indexed_frbr_clusters_by_uuid,
                                 self.indexed_frbr_clusters_by_titles,
                                 self.indexed_frbr_clusters_by_raw_record_id,
@@ -186,13 +180,21 @@ class FRBRizer(object):
                                 pymarc_object,
                                 item_conversion_table)
 
-                            # send new/modified clusters to final conversion
-                            logger.debug(f'Added: {updated_clusters[-1]} to send to converter (conversion).')
-                            # only the last cluster needs to be converted,
-                            # others have been merged and need to be deleted
-                            self.clusters_to_convert.update(updated_clusters[-1])
-                            logger.debug(f'Added: {updated_clusters[:-1]} to send to converter (deletion).')
+                            # send new/modified clusters to final converter
+                            # only the last cluster needs to be converted
+                            self.clusters_to_convert.add(updated_clusters[-1])
+                            logger.debug(
+                                f'Added: {updated_clusters[-1]} cluster(s) to send to converter (conversion).')
+
+                            # others have been merged with the last one and need to be deleted
                             self.clusters_to_delete.update(updated_clusters[:-1])
+                            logger.debug(
+                                f'Added: {updated_clusters[:-1]} cluster(s) to send to converter (deletion).')
+
+                            # send deleted expressions to final_converter
+                            self.expressions_to_delete.update(expressions_to_delete)
+                            logger.debug(
+                                f'Added: {expressions_to_delete} expression(s) to send to converter (deletion).')
 
     def frbrize_from_file(self,
                           filepath: str,
@@ -214,7 +216,7 @@ class FRBRizer(object):
                         "item_local_bib_id":
                             {"field": None,
                              "subfields": None,
-                             "from_ct": "[]"}
+                             "from_ct": "BN"}
                          },
                     "digital_item":
                         {"item_field_tag": "856",
@@ -238,8 +240,8 @@ class FRBRizer(object):
 
                 if c_valid.is_document_type(pymarc_object) and \
                         c_valid.is_single_or_multi_work(pymarc_object) == 'single_work' and \
-                        has_items(pymarc_object) and \
-                        is_245_indicator_2_valid(pymarc_object):
+                        c_valid.has_items(pymarc_object) and \
+                        c_valid.is_245_indicator_2_valid(pymarc_object):
 
                     logger.debug(f'Record will be processed.')
 
@@ -307,7 +309,7 @@ class FRBRizer(object):
 
                                             # now, when we have new manifestation, we can compare items, which were created earlier
                                             # from this raw bibliographic record - we have to be sure, that number of item records
-                                            # (one record per library) and item count (one library can have more than one phisical item)
+                                            # (one record per library) and item count (one library can have more than one physical item)
 
                                             # TODO
 
@@ -322,7 +324,7 @@ class FRBRizer(object):
 
                             # try to match each frbr_cluster with existing ones (one or more), merge them and reindex
                             # or create and index new frbr_cluster
-                            updated_clusters = frbr_cluster.match_work_and_index(
+                            updated_clusters, expressions_to_delete = frbr_cluster.match_work_and_index(
                                 self.indexed_frbr_clusters_by_uuid,
                                 self.indexed_frbr_clusters_by_titles,
                                 self.indexed_frbr_clusters_by_raw_record_id,
@@ -330,13 +332,18 @@ class FRBRizer(object):
                                 pymarc_object,
                                 item_conversion_table)
 
-                            # send new/modified clusters to final conversion
-                            logger.debug(f'Added: {updated_clusters[-1]} to send to converter (conversion).')
-                            # only the last cluster needs to be converted,
-                            # others have been merged and need to be deleted
-                            self.clusters_to_convert.update(updated_clusters[-1])
-                            logger.debug(f'Added: {updated_clusters[:-1]} to send to converter (deletion).')
+                            # send new/modified clusters to final converter
+                            # only the last cluster needs to be converted
+                            self.clusters_to_convert.add(updated_clusters[-1])
+                            logger.debug(f'Added: {updated_clusters[-1]} cluster(s) to send to converter (conversion).')
+
+                            # others have been merged with the last one and need to be deleted
                             self.clusters_to_delete.update(updated_clusters[:-1])
+                            logger.debug(f'Added: {updated_clusters[:-1]} cluster(s) to send to converter (deletion).')
+
+                            # send deleted expressions to final_converter
+                            self.expressions_to_delete.update(expressions_to_delete)
+                            logger.debug(f'Added: {expressions_to_delete} expression(s) to send to converter (deletion).')
 
             self.send_to_final_converter(connection_to_converter,
                                          final_converter_queue_name)
@@ -346,11 +353,18 @@ class FRBRizer(object):
                                 connection_to_converter,
                                 final_converter_queue_name):
 
-        logger.debug(f'Sending {len(self.clusters_to_convert)} cluster(s) for conversion '
-                     f'|| {len(self.clusters_to_delete)} cluster(s) for deletion to final-converter...')
+        logger.info(f'Sending to final-converter:\n'
+                     f'{len(self.clusters_to_convert)} cluster(s) for conversion\n'
+                     f'{len(self.clusters_to_delete)} cluster(s) for deletion\n'
+                     f'{len(self.expressions_to_delete)} expression(s) for deletion.')
 
+        # timestamp is used to control version of indexed documents in ElasticSearch
+        # due to asynchronous nature of fetching messages from queues and horizontal scaling of final-converter
+        # we have to be sure, that older version won't get indexed later than the newer one
         message = {'clusters_to_convert': list(self.clusters_to_convert),
-                   'clusters_to_delete': list(self.clusters_to_delete)}
+                   'clusters_to_delete': list(self.clusters_to_delete),
+                   'expressions_to_delete': list(self.expressions_to_delete),
+                   'timestamp': time.time_ns()}
 
         connection_to_converter.send(final_converter_queue_name,
                                      ujson.dumps(message))

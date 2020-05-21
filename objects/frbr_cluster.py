@@ -597,11 +597,11 @@ class FRBRCluster(object):
                                         matched_clusters_to_merge_with: List[FRBRCluster],
                                         indexed_frbr_clusters_by_uuid: Union[dict, redis.Redis],
                                         indexed_frbr_clusters_by_titles: Union[dict, redis.Redis],
-                                        indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis]) -> None:
+                                        indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis]) -> set:
 
         matched_frbr_cluster = matched_clusters_to_merge_with[0]
 
-        already_indexed = []
+        expressions_to_delete_from_es = set()
 
         # perform these actions only if merging stub with existing frbr_cluster
         # in this case stub is never indexed and dies after merging
@@ -626,7 +626,8 @@ class FRBRCluster(object):
             self.unindex_frbr_cluster_by_titles_before_merge(indexed_frbr_clusters_by_titles)
             self.merge_titles(matched_frbr_cluster)
             self.merge_manifestations_by_original_raw_id(matched_frbr_cluster)
-            self.merge_children(matched_frbr_cluster)
+            expressions_to_delete_from_merging_children = self.merge_children(matched_frbr_cluster)
+            expressions_to_delete_from_es.update(expressions_to_delete_from_merging_children)
             self.merge_work_data_by_raw_record_id(matched_frbr_cluster,
                                                   indexed_frbr_clusters_by_raw_record_id)
 
@@ -639,14 +640,18 @@ class FRBRCluster(object):
                 indexed_frbr_clusters_by_uuid.delete(self.uuid)
 
             if len(matched_clusters_to_merge_with) > 1:
-                matched_frbr_cluster.merge_frbr_clusters_and_reindex(matched_clusters_to_merge_with[1:],
-                                                                     indexed_frbr_clusters_by_uuid,
-                                                                     indexed_frbr_clusters_by_titles,
-                                                                     indexed_frbr_clusters_by_raw_record_id)
+                expressions_to_delete_from_es_from_recursion = matched_frbr_cluster.merge_frbr_clusters_and_reindex(
+                    matched_clusters_to_merge_with[1:],
+                    indexed_frbr_clusters_by_uuid,
+                    indexed_frbr_clusters_by_titles,
+                    indexed_frbr_clusters_by_raw_record_id)
+                expressions_to_delete_from_es.update(expressions_to_delete_from_es_from_recursion)
 
         if type(indexed_frbr_clusters_by_uuid) != dict:
             matched_frbr_cluster = matched_clusters_to_merge_with[-1]
             indexed_frbr_clusters_by_uuid.set(matched_frbr_cluster.uuid, pickle.dumps(matched_frbr_cluster))
+
+        return expressions_to_delete_from_es
 
     def merge_titles(self, matched_frbr_cluster: FRBRCluster) -> None:
         for title, counter in self.titles.items():
@@ -667,7 +672,9 @@ class FRBRCluster(object):
                                                                             indexed_frbr_clusters_by_raw_record_id)
 
     def merge_children(self,
-                       matched_frbr_cluster: FRBRCluster) -> None:
+                       matched_frbr_cluster: FRBRCluster) -> set:
+
+        expressions_to_delete_from_es = set()
 
         # merge strategy for merging two already existing frbr_clusters
         if not self.stub:
@@ -685,11 +692,10 @@ class FRBRCluster(object):
                     expression_to_merge_with_object = matched_frbr_cluster.expressions.get(
                         expression_to_merge_with_uuid)
 
-                    # move manifestations
                     for manifestation_uuid, manifestation_raw_record_id in self.expressions.get(
                             expression_uuid).manifestations.items():
 
-                        # move
+                        # move manifestations
                         expression_to_merge_with_object.manifestations.setdefault(
                             manifestation_uuid,
                             manifestation_raw_record_id)
@@ -698,6 +704,9 @@ class FRBRCluster(object):
                         matched_frbr_cluster.expressions_by_raw_record_id.setdefault(
                             manifestation_raw_record_id,
                             expression_to_merge_with_object.uuid)
+
+                    # get expression uuid to delete
+                    expressions_to_delete_from_es.add(expression_uuid)
 
                     # move expression_data_by_raw_id
                     for raw_id, expression_data in self.expressions.get(
@@ -761,6 +770,8 @@ class FRBRCluster(object):
                     self.manifestation_from_original_raw_record.raw_record_id,
                     matched_frbr_cluster.expressions_by_distinctive_tuple.get(
                         self.expression_distinctive_tuple_from_original_raw_record))
+
+        return expressions_to_delete_from_es
 
     # index entire cluster by titles
     # to avoid unnecessary requests (in case of merging) only new (with counter.prev_count == 0) titles are indexed
@@ -933,7 +944,7 @@ class FRBRCluster(object):
                              indexed_frbr_clusters_by_raw_record_id: Union[dict, redis.Redis],
                              indexed_manifestations_by_uuid: Union[dict, redis.Redis],
                              pymarc_object,
-                             item_conversion_table):
+                             item_conversion_table) -> tuple:
 
         matched_clusters = self.match_work(indexed_frbr_clusters_by_uuid,
                                            indexed_frbr_clusters_by_titles)
@@ -953,7 +964,7 @@ class FRBRCluster(object):
             self.index_frbr_cluster_by_raw_record_ids(indexed_frbr_clusters_by_raw_record_id)
             self.index_frbr_cluster_by_uuid(indexed_frbr_clusters_by_uuid)
 
-            return [self.uuid]
+            return [self.uuid], list()
 
         # there are one or more matches for this FRBRCluster stub
         else:
@@ -965,12 +976,13 @@ class FRBRCluster(object):
             else:
                 matched_clusters_to_merge_with = matched_clusters
 
-            self.merge_frbr_clusters_and_reindex(matched_clusters_to_merge_with,
-                                                 indexed_frbr_clusters_by_uuid,
-                                                 indexed_frbr_clusters_by_titles,
-                                                 indexed_frbr_clusters_by_raw_record_id)
+            expressions_to_delete_from_es = self.merge_frbr_clusters_and_reindex(
+                matched_clusters_to_merge_with,
+                indexed_frbr_clusters_by_uuid,
+                indexed_frbr_clusters_by_titles,
+                indexed_frbr_clusters_by_raw_record_id)
 
-            return [cluster.uuid for cluster in matched_clusters_to_merge_with]
+            return [cluster.uuid for cluster in matched_clusters_to_merge_with], list(expressions_to_delete_from_es)
 
     def index_manifestation(self, indexed_manifestations_by_uuid: Union[dict, redis.Redis]) -> None:
         if type(indexed_manifestations_by_uuid) == dict:

@@ -7,15 +7,11 @@ def resolve_institution_codes(institutions_list: list,
 
     if institution_codes:
         for inst_code in institutions_list:
+            print(inst_code)
             resolved_institution = institution_codes.get(inst_code)
+            print(resolved_institution)
             if resolved_institution:
-                resolved_list.append({'city': resolved_institution['city'],
-                                      'country': resolved_institution['country'],
-                                      'digital': resolved_institution['digital'],
-                                      'id': resolved_institution['id'],
-                                      'localization': resolved_institution['localization'],
-                                      'name': resolved_institution['name'],
-                                      'province': resolved_institution['province']})
+                resolved_list.append(resolved_institution)
 
     return resolved_list
 

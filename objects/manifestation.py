@@ -7,6 +7,7 @@ from commons.marc_iso_commons import to_single_value, get_values_by_field_and_su
 from commons.marc_iso_commons import postprocess, truncate_title_proper, normalize_publisher
 
 from resolvers.descriptor_resolvers import resolve_ids_to_names, resolve_ids_to_dict_objects
+from resolvers.descriptor_resolvers import resolve_ids_to_dict_objects_contributors
 from resolvers.codes_resolvers import resolve_institution_codes, resolve_codes_to_dict_objects
 
 from manifestation_matcher.manif_matcher import get_data_for_matching
@@ -40,7 +41,8 @@ class FRBRManifestation(object):
         self.mat_pub_city = get_values_by_field_and_subfield(pymarc_object, ('260', ['a']))
         self.mat_pub_info = get_values_by_field(pymarc_object, '260')
 
-        self.mat_contributor = []
+        self.mat_contributor = {}
+        self.get_mat_contributors(pymarc_object)
 
         self.mat_pub_country = []
         self.get_pub_country(pymarc_object)
@@ -87,6 +89,41 @@ class FRBRManifestation(object):
         manifestation_match_data_byte_array.extend(repr(sorted(mmd.edition)).encode('utf-8'))
 
         return sha1(manifestation_match_data_byte_array).hexdigest()
+
+    def get_mat_contributors(self, pymarc_object):
+        dict_val_7xx = {}
+
+        list_700_fields = pymarc_object.get_fields('700')
+        if list_700_fields:
+            for field in list_700_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds and 'Autor' not in e_subflds and 'Autor domniemany' not in e_subflds\
+                        and 'Wywiad' not in e_subflds:
+                    for e_sub in e_subflds:
+                        dict_val_7xx.setdefault(e_sub, set()).add(
+                            ' '.join(subfld for subfld in field.get_subfields('0')))
+
+        list_710_fields = pymarc_object.get_fields('710')
+        if list_710_fields:
+            for field in list_710_fields:
+                e_subflds = field.get_subfields('e')
+                if e_subflds and 'Autor' not in e_subflds and 'Autor domniemany' not in e_subflds \
+                        and 'Wywiad' not in e_subflds:
+                    for e_sub in e_subflds:
+                        dict_val_7xx.setdefault(e_sub, set()).add(
+                            ' '.join(subfld for subfld in field.get_subfields('0')))
+
+        list_711_fields = pymarc_object.get_fields('711')
+        if list_711_fields:
+            for field in list_711_fields:
+                j_subflds = field.get_subfields('j')
+                if j_subflds and 'Autor' not in j_subflds and 'Autor domniemany' not in j_subflds \
+                        and 'Wywiad' not in j_subflds:
+                    for j_sub in j_subflds:
+                        dict_val_7xx.setdefault(j_sub, set()).add(
+                            ' '.join(subfld for subfld in field.get_subfields('0')))
+
+        self.mat_contributor = dict_val_7xx
 
     def get_pub_country(self, pymarc_object):
         pub_008 = get_values_by_field(pymarc_object, '008')[0][15:18]
@@ -182,6 +219,12 @@ class FinalManifestation(object):
             for descr_nlp_id in getattr(self.frbr_manifestation, attribute):
                 resolver_cache.setdefault('descriptors', {}).setdefault(descr_nlp_id, None)
 
+        # special mat_contributor data collecting
+        for contribution_code, contributors_set in self.frbr_manifestation.mat_contributor.items():
+            resolver_cache.setdefault('contribution', {}).setdefault(contribution_code, None)
+            for descr_nlp_id in contributors_set:
+                resolver_cache.setdefault('descriptors', {}).setdefault(descr_nlp_id, None)
+
         descriptor_related_attributes = ['work_creator', 'work_creators']
 
         for attribute in descriptor_related_attributes:
@@ -235,7 +278,9 @@ class FinalManifestation(object):
                               'libraries': self.libraries,
                               'mat_carrier_type': resolve_codes_to_dict_objects(
                                   self.frbr_manifestation.mat_carrier_type, 'carrier_type', resolver_cache),
-                              'mat_contributor': self.frbr_manifestation.mat_contributor,
+                              'mat_contributor': resolve_ids_to_dict_objects_contributors(
+                                  self.frbr_manifestation.mat_contributor,
+                                  resolver_cache),
                               'mat_digital': self.mat_digital,
                               'mat_edition': self.frbr_manifestation.mat_edition,
                               'mat_external_id': self.frbr_manifestation.mat_external_id,
@@ -286,56 +331,7 @@ class FinalManifestation(object):
 #                 get_values_by_field_and_subfield(bib_object, ('380', ['a'])), descr_index))
 #
 #         self.get_work_creators(work)
-#         self.get_mat_contributors(bib_object, code_val_index, descr_index)
-#
-#     def get_mat_contributors(self, bib_object, code_val_index, descr_index):
-#         dict_val_7xx = {}
-#
-#         list_700_fields = bib_object.get_fields('700')
-#         if list_700_fields:
-#             for field in list_700_fields:
-#                 e_subflds = field.get_subfields('e')
-#                 if e_subflds and 'Autor' not in e_subflds and 'Autor domniemany' not in e_subflds\
-#                         and 'Wywiad' not in e_subflds:
-#                     for e_sub in e_subflds:
-#                         e_sub_code_resolved = code_val_index['contribution_dict'].get(e_sub)
-#                         if e_sub_code_resolved:
-#                             dict_val_7xx.setdefault(e_sub_code_resolved.get('name'), set()).add(
-#                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-#
-#         list_710_fields = bib_object.get_fields('710')
-#         if list_710_fields:
-#             for field in list_710_fields:
-#                 e_subflds = field.get_subfields('e')
-#                 if e_subflds and 'Autor' not in e_subflds and 'Autor domniemany' not in e_subflds \
-#                         and 'Wywiad' not in e_subflds:
-#                     for e_sub in e_subflds:
-#                         e_sub_code_resolved = code_val_index['contribution_dict'].get(e_sub)
-#                         if e_sub_code_resolved:
-#                             dict_val_7xx.setdefault(e_sub_code_resolved.get('name'), set()).add(
-#                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-#
-#         list_711_fields = bib_object.get_fields('711')
-#         if list_711_fields:
-#             for field in list_711_fields:
-#                 j_subflds = field.get_subfields('j')
-#                 if j_subflds and 'Autor' not in j_subflds and 'Autor domniemany' not in j_subflds \
-#                         and 'Wywiad' not in j_subflds:
-#                     for j_sub in j_subflds:
-#                         j_sub_code_resolved = code_val_index['contribution_dict'].get(j_sub)
-#                         if j_sub_code_resolved:
-#                             dict_val_7xx.setdefault(j_sub_code_resolved.get('name'), set()).add(
-#                                 ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-#
-#         resolved_dict = {}
-#
-#         for e_or_j_sub_value, set_7xx in dict_val_7xx.items():
-#             resolved_dict.setdefault(e_or_j_sub_value, []).extend(
-#                 resolve_ids_to_dict_objects(resolve_field_value(list(set_7xx), descr_index)))
-#         if resolved_dict:
-#             for key, value in resolved_dict.items():
-#                 self.mat_contributor.append({'key': key, 'value': value})
-#
+
 #     def get_work_creators(self, work):
 #         if work.main_creator:
 #             self.work_creator = only_values(work.main_creator)

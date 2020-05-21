@@ -86,7 +86,6 @@ class FinalWork(object):
 
         self.work_main_creator = []
         self.work_other_creator = []
-        self.work_other_creator_index = []
 
         self.work_udc = set()
         self.work_time_created = []
@@ -150,6 +149,9 @@ class FinalWork(object):
             self.work_subject_work = []  # TODO
 
             # join and calculate other descriptor related data
+            self.main_creator_real.update(work_data_object.main_creator_real_nlp_id)
+            self.other_creator_real.update(work_data_object.other_creator_real_nlp_id)
+
             self.work_genre.update(work_data_object.work_genre)
             self.work_subject_domain.update(work_data_object.work_subject_domain)
             self.work_form.update(work_data_object.work_form)
@@ -162,6 +164,24 @@ class FinalWork(object):
         self.calculate_title_pref()
         self.get_titles_of_orig_alt()
         self.get_titles_alt()
+
+        if self.main_creator_real:
+            self.sort_author = list(self.main_creator_real)[0]
+        if self.other_creator_real and not self.main_creator_real:
+            self.sort_author = list(self.other_creator_real)[0]
+
+        # get creators and creators for presentation
+        if len(self.main_creator_real) > 1:
+            list_cr = list(self.main_creator_real)
+            self.work_presentation_main_creator = list_cr[0]
+            self.work_presentation_another_creator = list_cr[1:]
+        else:
+            if self.main_creator_real:
+                self.work_presentation_main_creator = self.main_creator_real
+                self.work_presentation_another_creator = []
+            else:
+                self.work_presentation_main_creator = []
+                self.work_presentation_another_creator = []
 
         # we can calculate some filter and search attributes as well
         self.filter_creator.update(self.main_creator_real)
@@ -200,12 +220,16 @@ class FinalWork(object):
         #self.search_formal = set()
         #self.search_form = set()
 
+        # suggestions
+        self.suggest = list(self.search_title)
+        self.phrase_suggest = list(self.search_title)
+
     def join_and_calculate_impure_work_attributes_from_manifestation(self,
                                                                      final_manifestation: FinalManifestation):
 
         self.pub_country_codes.update(final_manifestation.frbr_manifestation.mat_pub_country)
-        self.filter_creator.update(final_manifestation.frbr_manifestation.mat_contributor)
-
+        for contributor_set in final_manifestation.frbr_manifestation.mat_contributor.values():
+            self.filter_creator.update(contributor_set)
         if final_manifestation.frbr_manifestation.mat_pub_date_single:
             self.filter_pub_date.add(final_manifestation.frbr_manifestation.mat_pub_date_single)
         if final_manifestation.frbr_manifestation.mat_pub_date_from:
@@ -333,55 +357,6 @@ class FinalWork(object):
         except IndexError:
             self.language_orig = 'und'
 
-    @staticmethod
-    def get_creators_from_manif(bib_object, descr_index):
-        list_val_700abcd = set()
-        list_val_710abcdn = set()
-        list_val_711abcdn = set()
-
-        list_700_fields = bib_object.get_fields('700')
-        if list_700_fields:
-            for field in list_700_fields:
-                e_subflds = field.get_subfields('e')
-                if e_subflds:
-                    if len(e_subflds) == 1 and e_subflds[0] not in ['Wyd.', 'Wydawca']:
-                        list_val_700abcd.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-                    else:
-                        list_val_700abcd.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd')))
-
-        resolved_list_700 = resolve_field_value(list(list_val_700abcd), descr_index)
-        only_values_from_list_700 = only_values(resolved_list_700)
-
-        list_710_fields = bib_object.get_fields('710')
-        if list_710_fields:
-            for field in list_710_fields:
-                e_subflds = field.get_subfields('e')
-                if e_subflds:
-                    if len(e_subflds) == 1 and e_subflds[0] not in ['Wyd.', 'Wydawca']:
-                        list_val_710abcdn.add(' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-        resolved_list_710 = resolve_field_value(list(list_val_710abcdn), descr_index)
-        only_values_from_list_710 = only_values(resolved_list_710)
-
-        list_711_fields = bib_object.get_fields('711')
-        if list_711_fields:
-            for field in list_711_fields:
-                j_subflds = field.get_subfields('j')
-                if j_subflds:
-                    if len(j_subflds) == 1 and j_subflds[0] not in ['Wyd.', 'Wydawca']:
-                        list_val_711abcdn.add(
-                            ' '.join(subfld for subfld in field.get_subfields('a', 'b', 'c', 'd', 'n')))
-
-        resolved_list_711 = resolve_field_value(list(list_val_711abcdn), descr_index)
-        only_values_from_list_711 = only_values(resolved_list_711)
-
-        to_return = set()
-        to_return.update(only_values_from_list_700)
-        to_return.update(only_values_from_list_710)
-        to_return.update(only_values_from_list_711)
-
-        return list(to_return)
-
     def get_uniform_publishers(self, bib_object, descr_index):
         list_val_710abcdn = set()
         list_710_fields = bib_object.get_fields('710')
@@ -401,21 +376,7 @@ class FinalWork(object):
     # def convert_to_work(self, manifestations_bn_by_id, buffer, descr_index, code_val_index):
     #
     #
-    #         # get creators and creators for presentation
-    #         self.work_main_creator = serialize_to_jsonl_descr_creator(list(self.main_creator_real))
-    #
-    #         if len(list(self.main_creator_real)) > 1:
-    #             self.work_presentation_main_creator = select_number_of_creators(self.work_main_creator,
-    #                                                                             cr_num_end=1)
-    #             self.work_presentation_another_creator = select_number_of_creators(self.work_main_creator,
-    #                                                                                cr_num_start=1)
-    #         else:
-    #             if self.main_creator_real:
-    #                 self.work_presentation_main_creator = self.work_main_creator
-    #                 self.work_presentation_another_creator = []
-    #             else:
-    #                 self.work_presentation_main_creator = []
-    #                 self.work_presentation_another_creator = []
+
     #
     #         self.work_time_created = []  # todo
     #         self.work_title_index = []  # todo
@@ -489,11 +450,6 @@ class FinalWork(object):
     #     self.search_title.add(self.work_title_pref)
     #     self.search_title.update(self.work_title_alt)
     #
-    #     # get creator for sorting
-    #     if self.main_creator:
-    #         self.sort_author = list(serialize_to_list_of_values(self.main_creator))[0]
-    #     if self.other_creator:
-    #         self.sort_author = list(serialize_to_list_of_values(self.other_creator))[0]
     #
     #     # get data for suggestions
     #     self.suggest = [self.work_title_pref]  # todo
@@ -548,7 +504,7 @@ class FinalWork(object):
                      'phrase_suggest': list(self.phrase_suggest),
                      'popularity-join': self.popularity_join,
                      'search_adress': list(self.search_adress),
-                     'search_authors': list(self.search_authors),
+                     'search_authors': resolve_ids_to_names(list(self.search_authors), resolver_cache),
                      'search_form': resolve_ids_to_names(list(self.search_form), resolver_cache),
                      'search_formal': resolve_ids_to_names(list(self.search_formal), resolver_cache),
                      'search_identity': list(self.search_identity),
@@ -569,12 +525,16 @@ class FinalWork(object):
                                                               resolver_cache),
                      'work_genre': resolve_ids_to_dict_objects(list(self.work_genre),
                                                                resolver_cache),
-                     'work_main_creator': list(self.main_creator_real),
-                     'work_other_creator': list(self.work_other_creator),
-                     'work_main_creator_index': list(self.work_main_creator_index),
-                     'work_other_creator_index': list(self.work_other_creator_index),
-                     'work_presentation_main_creator': list(self.work_presentation_main_creator),
-                     'work_presentation_another_creator': list(self.work_presentation_another_creator),
+                     'work_main_creator': resolve_ids_to_dict_objects(list(self.main_creator_real),
+                                                                      resolver_cache),
+                     'work_other_creator': resolve_ids_to_dict_objects(list(self.work_other_creator),
+                                                                       resolver_cache),
+                     'work_presentation_main_creator': resolve_ids_to_dict_objects(
+                         list(self.work_presentation_main_creator),
+                         resolver_cache),
+                     'work_presentation_another_creator': resolve_ids_to_dict_objects(list(
+                         self.work_presentation_another_creator),
+                         resolver_cache),
                      'work_publisher_work': self.work_publisher_work,
                      'work_subject': resolve_ids_to_dict_objects(list(self.work_subject),
                                                                  resolver_cache),

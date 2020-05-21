@@ -1,6 +1,5 @@
 from typing import List
 import logging
-import time
 import pickle
 import ujson
 
@@ -37,11 +36,12 @@ class FinalConverter(object):
 
         # create empty lists for appending final objects
         self.final_works = []
-        self.final_work_data_objects = []
         self.final_expressions = []
-        self.final_expression_data_objects = []
         self.final_manifestations = []
         self.final_items = []
+
+        self.works_to_delete = []
+        self.expressions_to_delete = []
 
         # all serialized final records are being collected in a list
         self.bulk_api_requests_to_send_to_indexer_as_a_list = []
@@ -52,23 +52,19 @@ class FinalConverter(object):
         self.resolver_cache = {}
 
     def convert_and_build_final_records(self,
-                                        frbr_cluster_uuids: List[str]):
+                                        frbr_cluster_uuids_to_convert: List[str],
+                                        frbr_cluster_uuids_to_delete: List[str],
+                                        expression_uuids_to_delete : List[str],
+                                        timestamp: int):
 
         # get all FRBRClusters (FRBRWorks and FRBRExpressions) from indexed_frbr_clusters_by_uuid
-        frbr_clusters_list = self.get_frbr_clusters(frbr_cluster_uuids)
-
-        # timestamp for ES version control updated upon requests to Redis
-        work_expression_timestamp = time.time_ns()
-        manifestation_item_timestamp = time.time_ns()
+        frbr_clusters_list = self.get_frbr_clusters(frbr_cluster_uuids_to_convert)
 
         # start main loop - iterater over FRBRClusters
         for frbr_cluster in frbr_clusters_list:
 
             # get FRBRmanifestations and appended FRBRitems from indexed_manifestations_by_uuid
             frbr_manifestations_list = self.get_frbr_manifestations(frbr_cluster)
-
-            # update timestamp for manifestation_item after request to Redis
-            manifestation_item_timestamp = time.time_ns()
 
             # create a dict with key=manifestation_uuid for fast access during iteration over expressions
             frbr_manifestations_dict = {}
@@ -79,7 +75,7 @@ class FinalConverter(object):
             # create FinalWork, join and calculate all "pure" work attributes
             # remaining "impure" attributes will be collected when iterating through
             # expressions, manifestations and items
-            final_work = FinalWork(frbr_cluster, work_expression_timestamp)
+            final_work = FinalWork(frbr_cluster, timestamp)
             final_work.join_and_calculate_pure_work_attributes()
 
             # iterate over expressions
@@ -156,41 +152,42 @@ class FinalConverter(object):
 
         self.get_data_for_resolver_cache()
 
-        self.resolve_and_serialize_all_records_for_bulk_request(work_expression_timestamp,
-                                                                manifestation_item_timestamp)
+        self.resolve_and_serialize_all_records_for_bulk_request(timestamp)
 
     def resolve_and_serialize_all_records_for_bulk_request(self,
-                                                           work_expression_timestamp,
-                                                           manifestation_item_timestamp):
+                                                           timestamp):
 
         # resolve all attributes in final work records, serialize them and prepare bulk api request
         for final_work in self.final_works:
             bulk_request_list = final_work.prepare_for_indexing_in_es(self.resolver_cache,
-                                                                      work_expression_timestamp)
+                                                                      timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
         # resolve all attributes in final expression records, serialize them and prepare bulk api request
         for final_expression in self.final_expressions:
             bulk_request_list = final_expression.prepare_for_indexing_in_es(self.resolver_cache,
-                                                                            work_expression_timestamp)
+                                                                            timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
         # resolve all attributes in final manifestation records, serialize them and prepare bulk api request
         for final_manifestation in self.final_manifestations:
             bulk_request_list = final_manifestation.prepare_for_indexing_in_es(self.resolver_cache,
-                                                                               manifestation_item_timestamp)
+                                                                               timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
         # resolve all attributes in final item records, serialize them and prepare bulk api request
         for final_item in self.final_items:
             bulk_request_list = final_item.prepare_for_indexing_in_es(self.resolver_cache,
-                                                                      manifestation_item_timestamp)
+                                                                      timestamp)
             self.bulk_api_requests_to_send_to_indexer_as_a_list.extend(bulk_request_list)
 
-    def send_bulk_request_to_indexer(self, connection_to_indexer):
-        wrapped_request = {'bulk_api_request': self.bulk_api_requests_to_send_to_indexer_as_a_list}
-        wrapped_request_in_json = ujson.dumps(wrapped_request, ensure_ascii=False)
-        connection_to_indexer.send('/queue/omnis.indexer-bibliographic', wrapped_request_in_json)
+    def send_bulk_request_to_indexer(self,
+                                     connection_to_indexer,
+                                     indexer_queue_name):
+        request = '\n'.join(
+            [ujson.dumps(req, ensure_ascii=False) for req in self.bulk_api_requests_to_send_to_indexer_as_a_list])
+
+        connection_to_indexer.send(indexer_queue_name, request)
 
     def flush_all(self):
         self.final_works = []
@@ -281,13 +278,20 @@ class FinalConverter(object):
                                                           'type': hit.meta.index,
                                                           'value': hit.descr_name}
                 if hit.meta.index == 'manager_library':
-                    institution_codes_dict[hit.code] = {'digital': hit.digital,
-                                                        'localization': hit.localization,
-                                                        'country': hit.country,
-                                                        'province': hit.province,
-                                                        'city': hit.city,
-                                                        'name': hit.name,
-                                                        'id': hit.code}
+                    try:
+                        institution_codes_dict[hit.code] = {'digital': hit.digital,
+                                                            'localization': hit.localization,
+                                                            'country': hit.country,
+                                                            'province': hit.province,
+                                                            'city': hit.city,
+                                                            'name': hit.name,
+                                                            'id': hit.code}
+                    except AttributeError:
+                        institution_codes_dict[hit.code] = {'digital': hit.digital,
+                                                            'name': hit.name,
+                                                            'id': hit.code}
+                    finally:
+                        continue
 
         # Redis queries below
         code_types = ['language', 'contribution', 'bibliography',

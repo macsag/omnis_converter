@@ -2,12 +2,14 @@ import logging
 import sys
 import os
 import time
+from uuid import uuid4
 
 import redis
 import stomp
 from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
 
+from indexers.codes_cache_indexer import get_data_from_cache
 from app_final_converter.final_converter import FinalConverter
 from amq_listeners.final_converter_listeners import FinalConverterListener
 
@@ -70,20 +72,36 @@ converter = FinalConverter(indexed_frbr_clusters_by_uuid_conn,
                            es_conn_for_resolver_cache,
                            redis_conn_for_resolver_cache_conn)
 
+# get data from postgres to cache
+POSTGRESQL_HOST = os.getenv('POSTGRESQL_HOST')
+POSTGRESQL_PORT = os.getenv('POSTGRESQL_PORT')
+POSTGRESQL_USER = os.getenv('POSTGRESQL_USER')
+POSTGRESQL_PASSWORD = os.getenv('POSTGRESQL_PASSWORD')
+
+get_data_from_cache(POSTGRESQL_HOST,
+                    POSTGRESQL_PORT,
+                    POSTGRESQL_USER,
+                    POSTGRESQL_PASSWORD,
+                    REDIS_HOST,
+                    REDIS_PORT)
+
 # initialize ActiveMQ connection and set FinalConverterListener with FinalConverter wrapped
 AMQ_HOST = os.getenv('AMQ_HOST')
 AMQ_PORT = os.getenv('AMQ_PORT')
 AMQ_USER = os.getenv('AMQ_USER')
 AMQ_PASSWORD = os.getenv('AMQ_PASSWORD')
 AMQ_FINAL_CONVERTER_QUEUE_NAME = os.getenv('AMQ_FINAL_CONVERTER_QUEUE_NAME')
+AMQ_INDEXER_QUEUE_NAME = os.getenv('AMQ_INDEXER_QUEUE_NAME')
 
 c = stomp.Connection([(AMQ_HOST, AMQ_PORT)], heartbeats=(0, 0), keepalive=True, auto_decode=False)
-c.set_listener('final_converter_listener', FinalConverterListener(converter, c))
+c.set_listener('final_converter_listener', FinalConverterListener(converter,
+                                                                  AMQ_INDEXER_QUEUE_NAME,
+                                                                  c))
 c.connect(AMQ_USER, AMQ_PASSWORD, wait=True)
 c.subscribe(destination=f'/queue/{AMQ_FINAL_CONVERTER_QUEUE_NAME}',
-            ack='client',
-            id='final_converter_listener',
-            headers={'activemq.prefetchSize': 5})
+            ack='client-individual',
+            id=f'final_converter_listener-{str(uuid4())}',
+            headers={'activemq.prefetchSize': 1})
 
 while True:
     time.sleep(5)

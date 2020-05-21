@@ -77,3 +77,11 @@ def is_single_or_multi_work(pymarc_object: Record) -> str:
         return 'single_work'
     if not is_2_1_1_1 and (not is_2_1_1_4 or not is_2_1_1_3):
         return 'multi_work_A1'
+
+
+def has_items(pymarc_object):
+    return True if get_values_by_field(pymarc_object, '852') else False
+
+
+def is_245_indicator_2_valid(pymarc_object):
+    return True if pymarc_object.get_fields('245')[0].indicators[1] in [str(n) for n in list(range(0, 10))] else False

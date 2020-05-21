@@ -32,4 +32,7 @@ def normalize_title(title: str) -> str:
         if match:
             title = title[:match.span(0)[0]]
 
+        # 3 należy usunąć ciąg znaków przypominający datę na końcu tytułu
+        # TODO
+
         return title
